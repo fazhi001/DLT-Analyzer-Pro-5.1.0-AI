@@ -1,0 +1,7 @@
+1. 解压本补丁。
+2. 将全部内容上传到现有GitHub仓库根目录并覆盖同名文件。
+3. 必须覆盖 .github/workflows/build-windows.yml。
+4. 进入Actions运行 Build DLT Analyzer Pro 4.1 Stability AI。
+5. 不要重跑旧的4.0任务。
+6. 成功后下载 DLT-Analyzer-Pro-4.1-AI-Stability-Setup-x64。
+7. Windows安装包尚需GitHub Actions实际构建验收。

@@ -1,0 +1,14 @@
+DLT Analyzer Pro 3.0 AI 验证报告
+
+自动化测试：17 passed
+源码自检：SELFTEST_OK
+主界面启动：GUI_SMOKE_OK
+AI窗口启动：AI_WINDOW_SMOKE_OK
+默认完整AI流程：FULL_DEFAULT_AI_OK
+历史样本：833期
+蒙特卡洛：1,000,000次
+机器学习模型：XGBoost前区/后区、LightGBM前区/后区
+输出组合：10注且不重复
+本环境完整流程耗时：约13.62秒（不同电脑会有差异）
+
+提示：测试通过表示软件流程和实现可运行，不代表模型能够预测随机开奖结果。

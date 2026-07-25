@@ -1,0 +1,24 @@
+DLT Analyzer Pro 4.2.2 升级说明
+
+1. 解压“DLT_Analyzer_Pro_4.2.2_AI_升级补丁.zip”。
+2. 将补丁内全部文件和文件夹上传到 GitHub 仓库根目录，覆盖同名文件。
+3. 必须覆盖：
+   .github/workflows/build-windows.yml
+   BUILD_WORKFLOW_COPY.yml
+   installer/DLTAnalyzerPro.iss
+   pyproject.toml
+   src/dlt_analyzer_pro/
+   tests/
+   tools/
+4. 提交说明：
+   release: add Beijing time and prediction history management 4.2.2
+5. 进入 Actions，运行：
+   Build DLT Analyzer Pro 4.2.2 Beijing Time and History Management AI
+6. 下载并覆盖安装：
+   DLT-Analyzer-Pro-4.2.2-AI-Credible-Setup-x64
+7. 打开“预测记录”检查：
+   - 生成时间与北京时间一致
+   - 可按目标期号和相对综合分筛选
+   - 可多选删除
+   - 可清空全部预测历史
+8. 删除操作只影响 predictions 表，不影响开奖历史、模型和设置。

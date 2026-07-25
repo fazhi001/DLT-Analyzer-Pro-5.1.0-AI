@@ -1,0 +1,11 @@
+DLT Analyzer Pro 4.2 AI 可信评估版升级说明
+
+1. 先保留现有4.1安装包和GitHub标签。
+2. 解压4.2升级补丁。
+3. 将补丁内文件上传到仓库根目录并覆盖同名文件。
+4. 必须覆盖 .github/workflows/build-windows.yml。
+5. 提交说明：release: upgrade to 4.2 credible evaluation
+6. 在 Actions 运行 Build DLT Analyzer Pro 4.2 Credible Evaluation AI。
+7. 构建成功后下载 DLT-Analyzer-Pro-4.2-AI-Credible-Setup-x64。
+
+可信回测建议：回测30期、Bootstrap 2000次、随机实验5000次。

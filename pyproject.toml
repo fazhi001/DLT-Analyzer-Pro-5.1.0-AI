@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dlt-analyzer-pro"
+version = "5.0.0"
+description = "DLT, PL3 and PL5 credible analysis desktop application"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=2.3,<3",
+    "scipy>=1.17,<2",
+    "pandas>=2.2,<3",
+    "scikit-learn>=1.8,<2",
+    "xgboost>=3.1,<4",
+    "lightgbm>=4.6,<5",
+    "joblib>=1.5,<2",
+    "openpyxl>=3.1,<4",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-q"

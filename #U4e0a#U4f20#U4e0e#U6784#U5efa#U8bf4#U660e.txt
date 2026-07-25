@@ -1,0 +1,20 @@
+本项目已经包含：
+
+.github/workflows/build-windows.yml
+
+上传到一个新的 GitHub 仓库后，进入：
+
+Actions → Build DLT Analyzer Pro 2.0 → Run workflow
+
+成功后下载：
+
+DLT-Analyzer-Pro-2.0-Setup-x64
+
+其中包含：
+
+DLT_Analyzer_Pro_2.0_Setup_x64.exe
+
+如果浏览器上传时遗漏了 .github 文件夹，可将根目录的
+BUILD_WORKFLOW_COPY.yml
+作为工作流内容，保存到：
+.github/workflows/build-windows.yml

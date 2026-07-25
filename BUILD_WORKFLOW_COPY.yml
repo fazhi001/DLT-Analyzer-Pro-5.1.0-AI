@@ -1,0 +1,193 @@
+name: Build DLT Analyzer Pro 5.0 Three Games
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: "构建成功后同时发布 v5.0.0 GitHub Release"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dlt-analyzer-pro-500-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 75
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Check release consistency
+        shell: pwsh
+        run: |
+          python tools/check_release_consistency.py
+          if ($LASTEXITCODE -ne 0) {
+            throw "Release version consistency check failed"
+          }
+
+      - name: Run unit and AI tests
+        shell: pwsh
+        run: |
+          python -m pytest
+          if ($LASTEXITCODE -ne 0) {
+            throw "Tests failed"
+          }
+
+      - name: Run source self-test
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "src"
+          python main.py --self-test
+          if ($LASTEXITCODE -ne 0) {
+            throw "Source self-test failed"
+          }
+
+      - name: Run stability audit
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "src"
+          python main.py --stability-check
+          if ($LASTEXITCODE -ne 0) {
+            throw "Stability audit failed"
+          }
+
+      - name: Run credible evaluation smoke test
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "src"
+          python main.py --credible-evaluation-check
+          if ($LASTEXITCODE -ne 0) {
+            throw "Credible evaluation check failed"
+          }
+
+      - name: Build Windows AI application
+        shell: pwsh
+        run: |
+          python -m PyInstaller --noconfirm --clean DLTAnalyzerPro.spec
+          if (!(Test-Path "dist\DLTAnalyzerPro\DLTAnalyzerPro.exe")) {
+            throw "DLTAnalyzerPro.exe was not generated"
+          }
+
+      - name: Verify packaged GUI starts
+        shell: pwsh
+        run: |
+          $proc = Start-Process `
+            -FilePath ".\dist\DLTAnalyzerPro\DLTAnalyzerPro.exe" `
+            -PassThru
+          Start-Sleep -Seconds 10
+          if ($proc.HasExited) {
+            throw "Packaged application exited during startup"
+          }
+          Stop-Process -Id $proc.Id -Force
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "installer\DLTAnalyzerPro.iss"
+          if (!(Test-Path "release\DLT_Analyzer_Pro_5.0.0_3Games_Setup_x64.exe")) {
+            throw "Installer was not generated"
+          }
+
+      - name: Create portable package and checksums
+        shell: pwsh
+        run: |
+          $portable = "release\DLT_Analyzer_Pro_5.0.0_3Games_Portable_x64.zip"
+          if (Test-Path $portable) { Remove-Item $portable -Force }
+          Compress-Archive -Path "dist\DLTAnalyzerPro\*" -DestinationPath $portable -CompressionLevel Optimal
+
+          $assets = @(
+            "release\DLT_Analyzer_Pro_5.0.0_3Games_Setup_x64.exe",
+            $portable
+          )
+          $lines = foreach ($asset in $assets) {
+            $hash = (Get-FileHash -Algorithm SHA256 $asset).Hash.ToLower()
+            "$hash  $([System.IO.Path]::GetFileName($asset))"
+          }
+          $lines | Set-Content -Encoding ascii "release\SHA256SUMS.txt"
+          python main.py --version | Set-Content -Encoding ascii "release\VERSION.txt"
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v7
+        with:
+          name: DLT-Analyzer-Pro-5.0.0-3Games-Setup-x64
+          path: release/DLT_Analyzer_Pro_5.0.0_3Games_Setup_x64.exe
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload portable application
+        uses: actions/upload-artifact@v7
+        with:
+          name: DLT-Analyzer-Pro-5.0.0-3Games-Portable-x64
+          path: release/DLT_Analyzer_Pro_5.0.0_3Games_Portable_x64.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload release metadata
+        uses: actions/upload-artifact@v7
+        with:
+          name: DLT-Analyzer-Pro-5.0.0-Release-Metadata
+          path: |
+            release/SHA256SUMS.txt
+            release/VERSION.txt
+            RELEASE_NOTES_5.0.0.md
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish GitHub Release
+        if: ${{ inputs.publish_release }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "v5.0.0"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch --tags --force
+          if (-not (git tag --list $tag)) {
+            git tag -a $tag -m "DLT Analyzer Pro 5.0 三种彩票可信分析版"
+            git push origin $tag
+          }
+
+          $assets = @(
+            "release\DLT_Analyzer_Pro_5.0.0_3Games_Setup_x64.exe",
+            "release\DLT_Analyzer_Pro_5.0.0_3Games_Portable_x64.zip",
+            "release\SHA256SUMS.txt",
+            "release\VERSION.txt"
+          )
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag @assets --clobber
+          } else {
+            gh release create $tag @assets `
+              --title "DLT Analyzer Pro 5.0 三种彩票可信分析版" `
+              --notes-file "RELEASE_NOTES_5.0.0.md"
+          }

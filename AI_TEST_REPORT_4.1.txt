@@ -1,0 +1,28 @@
+DLT Analyzer Pro 4.1 AI Stability Test Report
+================================================
+Version: 4.1.0
+
+Automated tests:
+- pytest: 26 passed
+- source self-test: SELFTEST_OK
+- compileall: passed
+
+Stability audit:
+- bundled draws: 833
+- passed: true
+- critical issues: 0
+- warnings: 0
+- dataset fingerprint prefix: bb8338d5a4d5
+
+Integration:
+- one-click adaptive flow: passed
+- rolling dynamic evaluation: 3 periods
+- Monte Carlo: 1,000,000 simulations
+- generated predictions: 5
+- verified database backup: passed
+- persisted model versions: 4
+- second scoring model cache hits: 4/4
+
+Packaging status:
+- PyInstaller/Inno Setup Windows build configuration updated to 4.1.
+- Final Windows installer must be validated by GitHub Actions on windows-latest.

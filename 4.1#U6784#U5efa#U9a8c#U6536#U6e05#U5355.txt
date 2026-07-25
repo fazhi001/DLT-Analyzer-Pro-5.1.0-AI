@@ -1,0 +1,21 @@
+DLT Analyzer Pro 4.1 构建验收清单
+
+GitHub Actions：
+[ ] Unit and AI tests 通过
+[ ] Source self-test 输出 SELFTEST_OK
+[ ] Stability audit 返回 passed=true
+[ ] PyInstaller 生成 dist\DLTAnalyzerPro\DLTAnalyzerPro.exe
+[ ] Packaged GUI starts 通过
+[ ] Inno Setup 生成 DLT_Analyzer_Pro_4.1_AI_Stability_Setup_x64.exe
+
+安装后：
+[ ] 主程序标题显示 4.1
+[ ] AI窗口出现“稳定性中心”标签
+[ ] 稳定性检查通过，数据库 quick_check=ok
+[ ] 立即备份后 backups 目录出现校验备份
+[ ] 首次AI训练生成4个模型版本
+[ ] 第二次相同数据评分显示 cache-hit
+[ ] 可以固定某个历史模型版本
+[ ] 可以恢复自动最新版本
+[ ] Excel报告包含概率校准、缓存状态、数据指纹和随机种子
+[ ] 异常日志目录 crash_reports 可写

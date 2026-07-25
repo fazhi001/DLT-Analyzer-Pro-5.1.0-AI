@@ -1,0 +1,24 @@
+DLT Analyzer Pro 4.2.1 正式稳定版升级说明
+
+1. 解压“4.2.1 AI 升级补丁”。
+2. 将补丁内全部文件和文件夹上传到 GitHub 仓库根目录并覆盖同名文件。
+3. 必须覆盖：
+   .github/workflows/build-windows.yml
+   BUILD_WORKFLOW_COPY.yml
+   installer/DLTAnalyzerPro.iss
+   pyproject.toml
+   src/dlt_analyzer_pro/
+   tests/
+   tools/
+4. 提交说明填写：
+   release: finalize DLT Analyzer Pro 4.2.1
+5. 进入 Actions，运行：
+   Build DLT Analyzer Pro 4.2.1 Final Stable AI
+6. 首次测试时将 publish_release 保持为 false。
+7. 确认构建绿色成功后，再运行一次并将 publish_release 设为 true。
+   工作流会自动创建标签 v4.2.1 和 GitHub Release，并上传：
+   - Windows 安装版
+   - Windows 便携版
+   - SHA256SUMS.txt
+   - VERSION.txt
+8. AppId 和用户数据目录保持不变，可覆盖安装且不迁移现有数据库。

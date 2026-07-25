@@ -1,0 +1,11 @@
+DLT Analyzer Pro 3.0 AI升级补丁
+
+1. 将本补丁解压后的全部内容上传到现有2.2 GitHub仓库根目录，覆盖同名文件。
+2. 必须更新 .github/workflows/build-windows.yml。
+   若网页不便上传隐藏文件夹，可打开根目录 BUILD_WORKFLOW_COPY.yml，
+   将它移动或复制为 .github/workflows/build-windows.yml。
+3. 提交后进入 Actions，运行 Build DLT Analyzer Pro 3.0 AI。
+4. 下载 DLT-Analyzer-Pro-3.0-AI-Setup-x64 并覆盖安装。
+
+本版本加入：贝叶斯、马尔可夫、遗漏周期、百万次蒙特卡洛、遗传算法、
+XGBoost、LightGBM、自动回测、随机基线和参数优化。

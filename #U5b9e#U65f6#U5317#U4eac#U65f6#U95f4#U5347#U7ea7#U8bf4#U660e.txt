@@ -1,0 +1,14 @@
+DLT Analyzer Pro 4.2.2 实时北京时间升级说明
+
+1. 解压实时北京时间升级补丁。
+2. 上传补丁内全部文件到GitHub仓库根目录并覆盖同名文件。
+3. 提交说明：
+   fix: make Beijing time real-time and network calibrated
+4. 运行Actions：
+   Build DLT Analyzer Pro 4.2.2 Beijing Time and History Management AI
+5. 覆盖安装生成的4.2.2 Setup-x64安装包。
+6. 启动后顶部应显示：
+   北京时间（网络校时）：YYYY-MM-DD HH:MM:SS
+   或在断网时显示：
+   北京时间（本机时钟）：YYYY-MM-DD HH:MM:SS
+7. 秒数应每秒变化；软件每30分钟自动重新校时。

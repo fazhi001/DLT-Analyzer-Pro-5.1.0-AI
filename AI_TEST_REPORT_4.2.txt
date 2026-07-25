@@ -1,0 +1,37 @@
+DLT Analyzer Pro 4.2 AI Credible Evaluation Test Report
+
+Version: 4.2.0
+Date: 2026-07-22
+
+Automated verification
+- pytest: 30 passed
+- Python compileall: passed
+- source self-test: SELFTEST_OK
+- GUI smoke test under Xvfb: GUI_SMOKE_OK
+- CLI credible evaluation smoke test: passed
+- credible evaluation Excel export: passed
+- machine-learning credible evaluation smoke test: passed
+
+Implemented statistics
+- Brier Skill Score against the uniform inclusion-probability reference
+- percentile Bootstrap 95% confidence interval
+- repeated random-ticket baseline via the exact hypergeometric law
+- empirical one-sided p-value for average hit performance
+- front/back conclusions reported separately
+
+Threading correction
+- Tkinter control values are captured on the UI thread before worker threads start.
+- Fixes the Windows symptom where buttons become disabled but the task appears not to respond.
+
+30-period fast statistical smoke result (ML disabled)
+- Front BSS: -0.029651; 95% CI [-0.046284, -0.013461]
+- Front random-hit p-value: 0.157768
+- Back BSS: -0.018555; 95% CI [-0.050455, 0.012291]
+- Back random-hit p-value: 0.560688
+
+Interpretation
+The smoke dataset did not demonstrate a stable predictive advantage. This is an expected and honest outcome for a random lottery process. The software reports uncertainty rather than converting weak historical variation into a misleading AI score.
+
+Windows status
+- Source and Linux/headless GUI validation passed.
+- Windows EXE and installer still require a green GitHub Actions build before final Windows acceptance.

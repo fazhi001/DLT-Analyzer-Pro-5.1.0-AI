@@ -1,0 +1,13 @@
+DLT Analyzer Pro 4.1 AI 稳定性版升级说明
+
+1. 先备份当前 GitHub 仓库或创建 v4.0.0 标签。
+2. 解压“4.1升级补丁”。
+3. 将补丁内全部文件和文件夹上传到仓库根目录，覆盖同名文件。
+4. 必须覆盖 .github/workflows/build-windows.yml。
+5. 提交说明可填写：release: upgrade to 4.1 stability edition
+6. 进入 GitHub Actions，运行：Build DLT Analyzer Pro 4.1 Stability AI
+7. 不要重跑旧的4.0任务。
+8. 成功后下载：DLT-Analyzer-Pro-4.1-AI-Stability-Setup-x64
+9. 安装后打开 AI 自适应系统 → 稳定性中心，先运行稳定性检查和立即备份。
+
+说明：4.1继续使用原来的本地数据库目录，升级安装不会主动删除历史开奖、预测记录或4.0权重。
