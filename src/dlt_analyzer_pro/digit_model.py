@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import math
-import random
 from dataclasses import dataclass
+from itertools import product
 from pathlib import Path
 from typing import Iterable
 
@@ -27,7 +27,10 @@ STRATEGIES = {
     "偏热模式": (0.10, 0.30, 0.40, 0.10, 0.10),
     "偏冷模式": (0.18, 0.14, 0.08, 0.05, 0.55),
 }
-FEATURE_VERSION = "digit-position-v1"
+FEATURE_VERSION = "digit-position-v2-walkforward"
+_MAX_ML_WEIGHT = 0.70
+_MIN_ABSOLUTE_IMPROVEMENT = 0.002
+_MIN_RELATIVE_IMPROVEMENT = 0.0025
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +42,9 @@ class PositionModelStatus:
     validation_logloss: float | None
     baseline_logloss: float | None
     reason: str
+    ml_weight: float = 0.0
+    validation_periods: int = 0
+    fold_win_rate: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,7 +66,30 @@ class _ModelBundle:
     baseline_logloss: float
     backend: str
     fingerprint: str
+    ml_weight: float
+    validation_periods: int
+    fold_win_rate: float
     feature_version: str = FEATURE_VERSION
+
+
+@dataclass(frozen=True, slots=True)
+class _WalkForwardResult:
+    baseline_probability: np.ndarray
+    model_probability: np.ndarray
+    targets: np.ndarray
+    fold_slices: tuple[slice, ...]
+    backend: str
+
+
+@dataclass(frozen=True, slots=True)
+class _BlendResult:
+    enabled: bool
+    ml_weight: float
+    baseline_loss: float
+    blended_loss: float
+    model_loss: float
+    fold_win_rate: float
+    reason: str
 
 
 def _normalize(values: np.ndarray) -> np.ndarray:
@@ -104,7 +133,11 @@ def _transition(values: np.ndarray) -> np.ndarray:
     if len(values) < 2:
         return np.full(10, 0.1, dtype=float)
     last = int(values[-1])
-    next_values = [int(values[index + 1]) for index in range(len(values) - 1) if int(values[index]) == last]
+    next_values = [
+        int(values[index + 1])
+        for index in range(len(values) - 1)
+        if int(values[index]) == last
+    ]
     if not next_values:
         return _counts(values[-30:], alpha=1.0)
     return _counts(np.asarray(next_values, dtype=int), alpha=1.0)
@@ -163,7 +196,7 @@ def _feature_vector(draws: list[DigitDraw], position: int) -> np.ndarray:
     features.extend(_omission_features(values).tolist())
     features.extend(_transition(values).tolist())
 
-    recent_draws = draws[-5:]
+    recent_draws = list(draws[-5:])
     for draw in recent_draws:
         digits = np.asarray(draw.digits, dtype=float)
         features.extend(
@@ -249,6 +282,200 @@ def _bundle_path(game: str, position: int, base_dir: Path | None = None) -> Path
     return directory / f"position_{position + 1}.joblib"
 
 
+def _fold_boundaries(sample_count: int, minimum_train: int = 30) -> list[tuple[int, int]]:
+    validation_count = min(120, max(40, int(sample_count * 0.25)))
+    validation_start = max(minimum_train, sample_count - validation_count)
+    remaining = sample_count - validation_start
+    if remaining < 20:
+        return []
+    fold_count = min(5, max(2, remaining // 20))
+    boundaries = np.linspace(validation_start, sample_count, fold_count + 1, dtype=int)
+    folds: list[tuple[int, int]] = []
+    for start, end in zip(boundaries[:-1], boundaries[1:]):
+        if end > start and start >= minimum_train:
+            folds.append((int(start), int(end)))
+    return folds
+
+
+def _walk_forward_validate(
+    draws: list[DigitDraw],
+    position: int,
+    x: np.ndarray,
+    y: np.ndarray,
+    indices: list[int],
+    seed: int,
+) -> _WalkForwardResult | None:
+    folds = _fold_boundaries(len(y))
+    if not folds:
+        return None
+
+    baseline_parts: list[np.ndarray] = []
+    model_parts: list[np.ndarray] = []
+    target_parts: list[np.ndarray] = []
+    output_slices: list[slice] = []
+    backend = ""
+    output_start = 0
+
+    for fold_number, (start, end) in enumerate(folds):
+        estimator, backend = _build_estimator(seed + fold_number)
+        estimator.fit(x[:start], y[:start])
+        model_probability = _map_probability(estimator, x[start:end])
+        baseline_probability = np.vstack(
+            [
+                statistical_position_probability(draws[: indices[row]], position, "均衡模式")
+                for row in range(start, end)
+            ]
+        )
+        baseline_parts.append(baseline_probability)
+        model_parts.append(model_probability)
+        target_parts.append(y[start:end])
+        output_end = output_start + (end - start)
+        output_slices.append(slice(output_start, output_end))
+        output_start = output_end
+
+    if not target_parts:
+        return None
+    return _WalkForwardResult(
+        baseline_probability=np.vstack(baseline_parts),
+        model_probability=np.vstack(model_parts),
+        targets=np.concatenate(target_parts),
+        fold_slices=tuple(output_slices),
+        backend=backend,
+    )
+
+
+def _blend_probability(
+    baseline_probability: np.ndarray,
+    model_probability: np.ndarray,
+    ml_weight: float,
+) -> np.ndarray:
+    weight = min(_MAX_ML_WEIGHT, max(0.0, float(ml_weight)))
+    blended = (1.0 - weight) * baseline_probability + weight * model_probability
+    blended = np.clip(blended, 1e-12, None)
+    blended /= blended.sum(axis=1, keepdims=True)
+    return blended
+
+
+def _optimize_blend(result: _WalkForwardResult) -> _BlendResult:
+    baseline_loss = float(
+        log_loss(result.targets, result.baseline_probability, labels=list(range(10)))
+    )
+    model_loss = float(
+        log_loss(result.targets, result.model_probability, labels=list(range(10)))
+    )
+
+    best_weight = 0.0
+    best_loss = baseline_loss
+    for weight in np.linspace(0.05, _MAX_ML_WEIGHT, 14):
+        probability = _blend_probability(
+            result.baseline_probability,
+            result.model_probability,
+            float(weight),
+        )
+        loss = float(log_loss(result.targets, probability, labels=list(range(10))))
+        if loss < best_loss:
+            best_loss = loss
+            best_weight = float(weight)
+
+    fold_wins = 0
+    for fold_slice in result.fold_slices:
+        fold_targets = result.targets[fold_slice]
+        baseline_fold_loss = float(
+            log_loss(
+                fold_targets,
+                result.baseline_probability[fold_slice],
+                labels=list(range(10)),
+            )
+        )
+        blended_fold_loss = float(
+            log_loss(
+                fold_targets,
+                _blend_probability(
+                    result.baseline_probability[fold_slice],
+                    result.model_probability[fold_slice],
+                    best_weight,
+                ),
+                labels=list(range(10)),
+            )
+        )
+        fold_wins += int(blended_fold_loss < baseline_fold_loss)
+
+    fold_win_rate = fold_wins / len(result.fold_slices)
+    required_improvement = max(
+        _MIN_ABSOLUTE_IMPROVEMENT,
+        baseline_loss * _MIN_RELATIVE_IMPROVEMENT,
+    )
+    improvement = baseline_loss - best_loss
+    enabled = (
+        best_weight > 0.0
+        and improvement >= required_improvement
+        and fold_win_rate >= 0.60
+    )
+    if enabled:
+        reason = (
+            f"滚动样本外验证通过：{len(result.targets)}期，"
+            f"AI权重{best_weight:.0%}，时间折胜率{fold_win_rate:.0%}"
+        )
+    elif best_weight <= 0.0:
+        reason = "滚动样本外验证未找到优于统计基线的融合权重，自动停用AI"
+    elif improvement < required_improvement:
+        reason = "滚动样本外改善幅度不足，自动回退统计基线"
+    else:
+        reason = "滚动时间折表现不稳定，自动回退统计基线"
+
+    return _BlendResult(
+        enabled=enabled,
+        ml_weight=best_weight if enabled else 0.0,
+        baseline_loss=baseline_loss,
+        blended_loss=best_loss if enabled else baseline_loss,
+        model_loss=model_loss,
+        fold_win_rate=fold_win_rate,
+        reason=reason,
+    )
+
+
+def _enumerated_digits(position_count: int) -> np.ndarray:
+    total = 10 ** position_count
+    values = np.arange(total, dtype=np.int32)
+    digits = np.empty((total, position_count), dtype=np.int8)
+    for position in range(position_count - 1, -1, -1):
+        digits[:, position] = values % 10
+        values //= 10
+    return digits
+
+
+def enumerate_digit_candidates(
+    probabilities: list[np.ndarray],
+    historical_sums: np.ndarray,
+    strategy: str,
+) -> tuple[np.ndarray, np.ndarray]:
+    position_count = len(probabilities)
+    digits = _enumerated_digits(position_count)
+    log_scores = np.zeros(len(digits), dtype=float)
+    for position, probability in enumerate(probabilities):
+        log_scores += np.log(np.clip(probability[digits[:, position]], 1e-12, None))
+
+    sum_mean = (
+        float(historical_sums.mean())
+        if len(historical_sums)
+        else 4.5 * position_count
+    )
+    sum_std = float(historical_sums.std()) if len(historical_sums) else 3.0
+    sum_std = max(1.0, sum_std)
+    z_score = np.abs(digits.sum(axis=1) - sum_mean) / sum_std
+    log_scores -= 0.08 * z_score
+
+    sorted_digits = np.sort(digits, axis=1)
+    unique_count = 1 + np.sum(np.diff(sorted_digits, axis=1) != 0, axis=1)
+    if strategy == "稳定模式":
+        log_scores += 0.05 * (unique_count >= max(2, position_count - 1))
+    elif strategy == "偏冷模式":
+        log_scores += 0.03 * (unique_count < position_count)
+
+    order = np.argsort(-log_scores, kind="stable")
+    return digits[order], log_scores[order]
+
+
 class DigitPredictionEngine:
     def __init__(self, game: str, seed: int = 20260724, model_base_dir: Path | None = None):
         game = game.lower()
@@ -256,13 +483,12 @@ class DigitPredictionEngine:
             raise ValueError(f"不支持的玩法：{game}")
         self.game = game
         self.position_count = GAME_POSITIONS[game]
-        self.random = random.Random(seed)
         self.seed = int(seed)
         self.model_base_dir = model_base_dir
 
     def train_models(self, draws: list[DigitDraw], force: bool = False) -> DigitModelReport:
         valid = [draw for draw in draws if draw.game == self.game]
-        if len(valid) < 80:
+        if len(valid) < 100:
             statuses = tuple(
                 PositionModelStatus(
                     position=index,
@@ -271,7 +497,7 @@ class DigitPredictionEngine:
                     backend="统计融合",
                     validation_logloss=None,
                     baseline_logloss=None,
-                    reason="至少需要80期数据才能训练可信位置模型",
+                    reason="至少需要100期数据进行滚动样本外验证",
                 )
                 for index in range(self.position_count)
             )
@@ -293,11 +519,14 @@ class DigitPredictionEngine:
                             PositionModelStatus(
                                 position=position,
                                 position_name=POSITION_NAMES[self.game][position],
-                                enabled=True,
+                                enabled=bundle.ml_weight > 0,
                                 backend=bundle.backend,
                                 validation_logloss=bundle.validation_logloss,
                                 baseline_logloss=bundle.baseline_logloss,
-                                reason="已加载与当前数据一致的模型",
+                                reason="已加载与当前数据一致的滚动验证模型",
+                                ml_weight=bundle.ml_weight,
+                                validation_periods=bundle.validation_periods,
+                                fold_win_rate=bundle.fold_win_rate,
                             )
                         )
                         continue
@@ -305,7 +534,7 @@ class DigitPredictionEngine:
                     pass
 
             x, y, indices = _build_dataset(valid, position)
-            if len(y) < 45 or len(np.unique(y)) < 5:
+            if len(y) < 65 or len(np.unique(y)) < 5:
                 statuses.append(
                     PositionModelStatus(
                         position=position,
@@ -319,51 +548,61 @@ class DigitPredictionEngine:
                 )
                 continue
 
-            validation_count = min(80, max(20, int(len(y) * 0.2)))
-            split = len(y) - validation_count
-            if split < 30:
-                split = max(20, len(y) - 20)
-            estimator, backend = _build_estimator(self.seed + position)
-            estimator.fit(x[:split], y[:split])
-            model_probability = _map_probability(estimator, x[split:])
-            model_loss = float(log_loss(y[split:], model_probability, labels=list(range(10))))
+            validation = _walk_forward_validate(
+                valid,
+                position,
+                x,
+                y,
+                indices,
+                self.seed + position * 100,
+            )
+            if validation is None:
+                statuses.append(
+                    PositionModelStatus(
+                        position=position,
+                        position_name=POSITION_NAMES[self.game][position],
+                        enabled=False,
+                        backend="统计融合",
+                        validation_logloss=None,
+                        baseline_logloss=None,
+                        reason="无法形成足够的滚动验证时间折",
+                    )
+                )
+                continue
 
-            baseline_probability = np.vstack(
-                [
-                    statistical_position_probability(valid[:indices[row]], position, "均衡模式")
-                    for row in range(split, len(indices))
-                ]
-            )
-            baseline_loss = float(log_loss(y[split:], baseline_probability, labels=list(range(10))))
-            enabled = model_loss < baseline_loss * 0.995
-            reason = (
-                "样本外Log Loss优于统计基线"
-                if enabled
-                else "样本外表现未优于统计基线，自动停用AI"
-            )
-            if enabled:
+            blend = _optimize_blend(validation)
+            if blend.enabled:
+                estimator, backend = _build_estimator(self.seed + position)
                 estimator.fit(x, y)
                 bundle = _ModelBundle(
                     model=estimator,
                     classes=np.asarray(estimator.classes_, dtype=int),
-                    validation_logloss=model_loss,
-                    baseline_logloss=baseline_loss,
+                    validation_logloss=blend.blended_loss,
+                    baseline_logloss=blend.baseline_loss,
                     backend=backend,
                     fingerprint=fingerprint,
+                    ml_weight=blend.ml_weight,
+                    validation_periods=len(validation.targets),
+                    fold_win_rate=blend.fold_win_rate,
                 )
                 joblib.dump(bundle, path)
-            elif path.exists():
-                path.unlink(missing_ok=True)
+            else:
+                backend = "统计融合"
+                if path.exists():
+                    path.unlink(missing_ok=True)
 
             statuses.append(
                 PositionModelStatus(
                     position=position,
                     position_name=POSITION_NAMES[self.game][position],
-                    enabled=enabled,
-                    backend=backend if enabled else "统计融合",
-                    validation_logloss=model_loss,
-                    baseline_logloss=baseline_loss,
-                    reason=reason,
+                    enabled=blend.enabled,
+                    backend=backend,
+                    validation_logloss=blend.blended_loss,
+                    baseline_logloss=blend.baseline_loss,
+                    reason=blend.reason,
+                    ml_weight=blend.ml_weight,
+                    validation_periods=len(validation.targets),
+                    fold_win_rate=blend.fold_win_rate,
                 )
             )
         return DigitModelReport(self.game, fingerprint, tuple(statuses))
@@ -402,10 +641,14 @@ class DigitPredictionEngine:
                         isinstance(bundle, _ModelBundle)
                         and bundle.fingerprint == fingerprint
                         and bundle.feature_version == FEATURE_VERSION
+                        and bundle.ml_weight > 0
                     ):
                         x = _feature_vector(valid, position).reshape(1, -1)
                         ml_probability = _map_probability(bundle.model, x)[0]
-                        probability = _normalize(0.65 * statistical + 0.35 * ml_probability)
+                        probability = _normalize(
+                            (1.0 - bundle.ml_weight) * statistical
+                            + bundle.ml_weight * ml_probability
+                        )
                         enabled_count += 1
                         status = PositionModelStatus(
                             position=position,
@@ -414,14 +657,21 @@ class DigitPredictionEngine:
                             backend=bundle.backend,
                             validation_logloss=bundle.validation_logloss,
                             baseline_logloss=bundle.baseline_logloss,
-                            reason="AI通过样本外验证，与统计概率融合",
+                            reason=f"滚动验证通过，AI动态权重{bundle.ml_weight:.0%}",
+                            ml_weight=bundle.ml_weight,
+                            validation_periods=bundle.validation_periods,
+                            fold_win_rate=bundle.fold_win_rate,
                         )
                 except Exception:
                     pass
             probabilities.append(probability)
             statuses.append(status)
 
-        mode = f"AI+统计融合（{enabled_count}/{self.position_count}位）" if enabled_count else "统计融合"
+        mode = (
+            f"可信动态融合（{enabled_count}/{self.position_count}位）"
+            if enabled_count
+            else "统计融合"
+        )
         return probabilities, mode, tuple(statuses)
 
     def generate(
@@ -432,42 +682,32 @@ class DigitPredictionEngine:
         candidate_count: int = 5000,
         use_ml: bool = True,
     ) -> list[DigitPrediction]:
+        # candidate_count is retained for API compatibility. V2 always evaluates
+        # the complete PL3/PL5 outcome space, so no candidate can be missed.
+        del candidate_count
         count = max(1, min(int(count), 200))
         probabilities, mode, _ = self.position_probabilities(draws, strategy, use_ml=use_ml)
         historical_sums = np.asarray([sum(draw.digits) for draw in draws[-300:]], dtype=float)
-        sum_mean = float(historical_sums.mean()) if len(historical_sums) else 4.5 * self.position_count
-        sum_std = float(historical_sums.std()) if len(historical_sums) else 3.0
-        sum_std = max(1.0, sum_std)
-
-        candidates: dict[tuple[int, ...], float] = {}
-        for _ in range(max(candidate_count, count * 120)):
-            digits = tuple(
-                self.random.choices(range(10), weights=probability.tolist(), k=1)[0]
-                for probability in probabilities
-            )
-            log_score = sum(math.log(max(1e-12, probabilities[index][digit])) for index, digit in enumerate(digits))
-            z_score = abs(sum(digits) - sum_mean) / sum_std
-            structure = -0.08 * z_score
-            unique_count = len(set(digits))
-            if strategy == "稳定模式" and unique_count >= max(2, self.position_count - 1):
-                structure += 0.05
-            if strategy == "偏冷模式" and unique_count < self.position_count:
-                structure += 0.03
-            score = log_score + structure
-            if digits not in candidates or score > candidates[digits]:
-                candidates[digits] = score
-
-        ranked = sorted(candidates.items(), key=lambda item: item[1], reverse=True)
-        if not ranked:
+        ranked_digits, ranked_scores = enumerate_digit_candidates(
+            probabilities,
+            historical_sums,
+            strategy,
+        )
+        if not len(ranked_scores):
             return []
-        raw = np.asarray([score for _, score in ranked], dtype=float)
-        top = float(raw.max())
-        scaled = np.exp(np.clip(raw - top, -50, 0))
+
+        top = float(ranked_scores[0])
+        scaled = np.exp(np.clip(ranked_scores - top, -50, 0))
         scaled /= scaled.max() if scaled.max() > 0 else 1.0
 
         selected: list[DigitPrediction] = []
-        for index, (digits, _) in enumerate(ranked):
-            if any(sum(a == b for a, b in zip(digits, item.digits)) >= self.position_count - 1 for item in selected):
+        selected_digits: list[tuple[int, ...]] = []
+        for index, row in enumerate(ranked_digits):
+            digits = tuple(int(value) for value in row)
+            if any(
+                sum(a == b for a, b in zip(digits, existing)) >= self.position_count - 1
+                for existing in selected_digits
+            ):
                 continue
             selected.append(
                 DigitPrediction(
@@ -478,11 +718,14 @@ class DigitPredictionEngine:
                     model_mode=mode,
                 )
             )
+            selected_digits.append(digits)
             if len(selected) >= count:
                 break
+
         if len(selected) < count:
-            existing = {item.digits for item in selected}
-            for index, (digits, _) in enumerate(ranked):
+            existing = set(selected_digits)
+            for index, row in enumerate(ranked_digits):
+                digits = tuple(int(value) for value in row)
                 if digits in existing:
                     continue
                 selected.append(
@@ -494,6 +737,7 @@ class DigitPredictionEngine:
                         model_mode=mode,
                     )
                 )
+                existing.add(digits)
                 if len(selected) >= count:
                     break
         return selected
@@ -512,7 +756,6 @@ def digit_analysis_rows(
     for position in range(GAME_POSITIONS[game]):
         values = _position_matrix(draws, position)
         counts = np.bincount(values, minlength=10)
-        omissions = _omission_features(values)
         for digit in range(10):
             last_indices = np.where(values == digit)[0]
             gap = len(values) if len(last_indices) == 0 else len(values) - 1 - int(last_indices[-1])

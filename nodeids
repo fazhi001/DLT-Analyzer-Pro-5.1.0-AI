@@ -1,0 +1,7 @@
+[
+  "tests/test_digit_credible_engine.py::test_blend_probability_is_normalized",
+  "tests/test_digit_credible_engine.py::test_complete_enumeration_sizes_and_boundaries",
+  "tests/test_digit_credible_engine.py::test_enumeration_ranks_known_peak_first",
+  "tests/test_digit_credible_engine.py::test_generation_is_deterministic_across_seeds",
+  "tests/test_digit_credible_engine.py::test_training_uses_bounded_dynamic_weights"
+]
