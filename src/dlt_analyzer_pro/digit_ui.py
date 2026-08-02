@@ -34,7 +34,7 @@ class DigitGamesWindow:
         self.parent = parent
         self.database = database
         self.window = tk.Toplevel(parent)
-        self.window.title("DLT Analyzer Pro 5.0 · 排列三 / 排列五中心")
+        self.window.title("DLT Analyzer Pro 5.1 · 排列三 / 排列五中心")
         self.window.geometry("1180x760")
         self.window.minsize(980, 650)
         self.window.transient(parent)
