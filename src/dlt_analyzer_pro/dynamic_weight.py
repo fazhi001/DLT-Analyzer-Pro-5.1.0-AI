@@ -168,15 +168,21 @@ def evaluate_dynamic_weights(
         if progress is not None:
             progress(f"滚动评估模型 {offset + 1}/{periods}", 0.72 * (offset + 1) / periods)
 
+    # Reserve the newest folds as a final holdout. They are never used to learn component weights.
+    holdout_count = max(10, min(30, periods // 3))
+    selection_count = periods - holdout_count
+    if selection_count < 3:
+        raise ValueError("动态权重选择期不足")
+
     rows: list[dict[str, float | str]] = []
     for name in COMPONENT_NAMES:
         rows.append(
             {
                 "name": name,
-                "front_brier": float(np.mean(metrics[name]["front_brier"])),
-                "back_brier": float(np.mean(metrics[name]["back_brier"])),
-                "front_hits": float(np.mean(metrics[name]["front_hits"])),
-                "back_hits": float(np.mean(metrics[name]["back_hits"])),
+                "front_brier": float(np.mean(metrics[name]["front_brier"][:selection_count])),
+                "back_brier": float(np.mean(metrics[name]["back_brier"][:selection_count])),
+                "front_hits": float(np.mean(metrics[name]["front_hits"][:selection_count])),
+                "back_hits": float(np.mean(metrics[name]["back_hits"][:selection_count])),
             }
         )
 
@@ -191,15 +197,15 @@ def evaluate_dynamic_weights(
     if progress is not None:
         progress("计算前后区基线保护", 0.82)
     front_guard = fit_baseline_guard(
-        front_probabilities,
-        front_targets,
+        front_probabilities[selection_count:],
+        front_targets[selection_count:],
         picks=5,
-        bootstrap_samples=max(1000, min(5000, periods * 100)),
+        bootstrap_samples=max(1000, min(5000, holdout_count * 100)),
         seed=seed + 81_001,
     )
     back_guard = fit_baseline_guard(
-        back_probabilities,
-        back_targets,
+        back_probabilities[selection_count:],
+        back_targets[selection_count:],
         picks=2,
         bootstrap_samples=max(1000, min(5000, periods * 100)),
         seed=seed + 81_002,
