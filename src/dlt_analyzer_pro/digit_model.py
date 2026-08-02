@@ -13,6 +13,7 @@ from sklearn.metrics import log_loss
 
 from .models import DigitDraw, DigitPrediction
 from .paths import model_dir
+from .holdout_validation import evaluate_final_holdout
 
 
 GAME_NAMES = {"pl3": "排列三", "pl5": "排列五"}
@@ -357,82 +358,81 @@ def _blend_probability(
 
 
 def _optimize_blend(result: _WalkForwardResult) -> _BlendResult:
+    """Select a blend on earlier folds, then judge it on a final untouched holdout."""
+    total = len(result.targets)
+    holdout_count = max(30, total // 4)
+    selection_end = total - holdout_count
+    if selection_end < 20:
+        baseline_loss = float(
+            log_loss(result.targets, result.baseline_probability, labels=list(range(10)))
+        )
+        return _BlendResult(
+            enabled=False,
+            ml_weight=0.0,
+            baseline_loss=baseline_loss,
+            blended_loss=baseline_loss,
+            model_loss=baseline_loss,
+            fold_win_rate=0.0,
+            reason="独立留出期不足，自动停用AI",
+        )
+
+    selection_targets = result.targets[:selection_end]
+    selection_baseline = result.baseline_probability[:selection_end]
+    selection_model = result.model_probability[:selection_end]
     baseline_loss = float(
-        log_loss(result.targets, result.baseline_probability, labels=list(range(10)))
+        log_loss(selection_targets, selection_baseline, labels=list(range(10)))
     )
     model_loss = float(
-        log_loss(result.targets, result.model_probability, labels=list(range(10)))
+        log_loss(selection_targets, selection_model, labels=list(range(10)))
     )
 
     best_weight = 0.0
     best_loss = baseline_loss
     for weight in np.linspace(0.05, _MAX_ML_WEIGHT, 14):
-        probability = _blend_probability(
-            result.baseline_probability,
-            result.model_probability,
-            float(weight),
-        )
-        loss = float(log_loss(result.targets, probability, labels=list(range(10))))
+        probability = _blend_probability(selection_baseline, selection_model, float(weight))
+        loss = float(log_loss(selection_targets, probability, labels=list(range(10))))
         if loss < best_loss:
             best_loss = loss
             best_weight = float(weight)
 
-    fold_wins = 0
-    for fold_slice in result.fold_slices:
-        fold_targets = result.targets[fold_slice]
-        baseline_fold_loss = float(
-            log_loss(
-                fold_targets,
-                result.baseline_probability[fold_slice],
-                labels=list(range(10)),
-            )
-        )
-        blended_fold_loss = float(
-            log_loss(
-                fold_targets,
-                _blend_probability(
-                    result.baseline_probability[fold_slice],
-                    result.model_probability[fold_slice],
-                    best_weight,
-                ),
-                labels=list(range(10)),
-            )
-        )
-        fold_wins += int(blended_fold_loss < baseline_fold_loss)
-
-    fold_win_rate = fold_wins / len(result.fold_slices)
-    required_improvement = max(
-        _MIN_ABSOLUTE_IMPROVEMENT,
-        baseline_loss * _MIN_RELATIVE_IMPROVEMENT,
+    selected_probability = _blend_probability(
+        result.baseline_probability[selection_end:],
+        result.model_probability[selection_end:],
+        best_weight,
     )
-    improvement = baseline_loss - best_loss
-    enabled = (
-        best_weight > 0.0
-        and improvement >= required_improvement
-        and fold_win_rate >= 0.60
-    )
-    if enabled:
-        reason = (
-            f"滚动样本外验证通过：{len(result.targets)}期，"
-            f"AI权重{best_weight:.0%}，时间折胜率{fold_win_rate:.0%}"
+    holdout_baseline = -np.log(
+        np.clip(
+            result.baseline_probability[selection_end:][
+                np.arange(holdout_count), result.targets[selection_end:]
+            ],
+            1e-12,
+            1.0,
         )
-    elif best_weight <= 0.0:
-        reason = "滚动样本外验证未找到优于统计基线的融合权重，自动停用AI"
-    elif improvement < required_improvement:
-        reason = "滚动样本外改善幅度不足，自动回退统计基线"
-    else:
-        reason = "滚动时间折表现不稳定，自动回退统计基线"
-
+    )
+    holdout_candidate = -np.log(
+        np.clip(
+            selected_probability[
+                np.arange(holdout_count), result.targets[selection_end:]
+            ],
+            1e-12,
+            1.0,
+        )
+    )
+    holdout = evaluate_final_holdout(
+        holdout_candidate,
+        holdout_baseline,
+        minimum_holdout=holdout_count,
+    )
+    enabled = bool(best_weight > 0.0 and holdout.enabled)
     return _BlendResult(
         enabled=enabled,
         ml_weight=best_weight if enabled else 0.0,
-        baseline_loss=baseline_loss,
-        blended_loss=best_loss if enabled else baseline_loss,
+        baseline_loss=holdout.baseline_loss,
+        blended_loss=holdout.candidate_loss if enabled else holdout.baseline_loss,
         model_loss=model_loss,
-        fold_win_rate=fold_win_rate,
-        reason=reason,
+        fold_win_rate=1.0 if holdout.enabled else 0.0,
+        reason=holdout.reason,
     )
-
 
 def _enumerated_digits(position_count: int) -> np.ndarray:
     total = 10 ** position_count
