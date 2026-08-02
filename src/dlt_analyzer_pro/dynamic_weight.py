@@ -205,14 +205,14 @@ def evaluate_dynamic_weights(
         progress("计算前后区基线保护", 0.82)
     front_guard = fit_baseline_guard(
         front_probabilities[guard_start:],
-        front_targets[guard_start:]
+        front_targets[guard_start:],
         picks=5,
         bootstrap_samples=max(1000, min(5000, guard_periods * 100)),
         seed=seed + 81_001,
     )
     back_guard = fit_baseline_guard(
         back_probabilities[guard_start:],
-        back_targets[guard_start:]
+        back_targets[guard_start:],
         picks=2,
         bootstrap_samples=max(1000, min(5000, guard_periods * 100)),
         seed=seed + 81_002,
