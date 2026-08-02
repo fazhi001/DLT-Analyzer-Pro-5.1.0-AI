@@ -168,15 +168,28 @@ def evaluate_dynamic_weights(
         if progress is not None:
             progress(f"滚动评估模型 {offset + 1}/{periods}", 0.72 * (offset + 1) / periods)
 
+    # Reserve the newest folds as a final holdout when the window is large enough.
+    # Three-period windows are retained for fast smoke tests only; they cannot
+    # support an independent holdout, so they use the legacy all-OOS guard.
+    if periods < 10:
+        selection_count = periods
+        guard_start = 0
+        guard_periods = periods
+    else:
+        holdout_count = max(10, min(30, periods // 3))
+        selection_count = periods - holdout_count
+        guard_start = selection_count
+        guard_periods = holdout_count
+
     rows: list[dict[str, float | str]] = []
     for name in COMPONENT_NAMES:
         rows.append(
             {
                 "name": name,
-                "front_brier": float(np.mean(metrics[name]["front_brier"])),
-                "back_brier": float(np.mean(metrics[name]["back_brier"])),
-                "front_hits": float(np.mean(metrics[name]["front_hits"])),
-                "back_hits": float(np.mean(metrics[name]["back_hits"])),
+                "front_brier": float(np.mean(metrics[name]["front_brier"][:selection_count])),
+                "back_brier": float(np.mean(metrics[name]["back_brier"][:selection_count])),
+                "front_hits": float(np.mean(metrics[name]["front_hits"][:selection_count])),
+                "back_hits": float(np.mean(metrics[name]["back_hits"][:selection_count])),
             }
         )
 
@@ -191,17 +204,17 @@ def evaluate_dynamic_weights(
     if progress is not None:
         progress("计算前后区基线保护", 0.82)
     front_guard = fit_baseline_guard(
-        front_probabilities,
-        front_targets,
+        front_probabilities[guard_start:],
+        front_targets[guard_start:],
         picks=5,
-        bootstrap_samples=max(1000, min(5000, periods * 100)),
+        bootstrap_samples=max(1000, min(5000, guard_periods * 100)),
         seed=seed + 81_001,
     )
     back_guard = fit_baseline_guard(
-        back_probabilities,
-        back_targets,
+        back_probabilities[guard_start:],
+        back_targets[guard_start:],
         picks=2,
-        bootstrap_samples=max(1000, min(5000, periods * 100)),
+        bootstrap_samples=max(1000, min(5000, guard_periods * 100)),
         seed=seed + 81_002,
     )
 
