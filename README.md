@@ -1,8 +1,38 @@
-# pytest cache directory #
+# DLT Analyzer Pro 5.0.1 AI 可信分析版
 
-This directory contains data from the pytest's cache plugin,
-which provides the `--lf` and `--ff` options, as well as the `cache` fixture.
+Windows 桌面版大乐透、排列三、排列五统计分析与概率实验工具。
 
-**Do not** commit this to version control.
+## 支持玩法
 
-See [the docs](https://docs.pytest.org/en/stable/how-to/cache.html) for more information.
+- 大乐透：前区 35 选 5、后区 12 选 2。
+- 排列三：3 个独立数字位置。
+- 排列五：5 个独立数字位置。
+
+## 可信分析原则
+
+- 所有模型先与统计或均匀概率基线比较。
+- 未在时间顺序的样本外验证中显示稳定优势时，AI 自动停用或收缩。
+- “排序分”和模型概率只用于统计研究与候选排序，不代表中奖概率，也不保证未来结果。
+- 历史和值、奇偶、冷热和号码结构属于候选偏好，不应被理解为提高随机开奖命中率的证据。
+
+## 主要功能
+
+- 官方历史数据的导入与增量更新。
+- 大乐透前后区独立模型、动态权重、Brier Skill Score（BSS）和基线保护。
+- 排列三/五逐位置统计概率、机器学习融合及滚动样本外验证。
+- Excel 导出、预测历史、数据库备份、崩溃报告与 Windows 安装包构建。
+
+## 使用建议
+
+1. 先更新并检查历史数据。
+2. 在“可信回测”中查看独立验证的 Brier、Log Loss 与 BSS。
+3. 只有 AI 状态为“启用”时，才将其作为统计候选排序的附加信息。
+4. 选号策略（均衡、分散、冷热等）仅改变候选展示方式，不改变可信结论。
+
+## 构建 Windows 版本
+
+在 GitHub Actions 运行 **Build DLT Analyzer Pro 5.0 Three Games**。构建完成后下载安装包或便携包，并使用发布的 SHA256 校验文件验证完整性。
+
+## 风险说明
+
+彩票开奖结果具有随机性。任何基于历史数据的回测、概率分布、机器学习模型或统计评分都不能证明能够预测未来开奖结果。
