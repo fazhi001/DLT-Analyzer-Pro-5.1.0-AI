@@ -1,4 +1,4 @@
-# DLT Analyzer Pro 5.1.0 AI 可信分析版
+# DLT Analyzer Pro 5.1.1 AI 可信分析版
 
 Windows 桌面版大乐透、排列三、排列五统计分析与概率实验工具。
 
