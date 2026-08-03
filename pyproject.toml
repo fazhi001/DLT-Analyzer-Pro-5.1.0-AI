@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dlt-analyzer-pro"
-version = "5.1.0"
+version = "5.1.1"
 description = "DLT, PL3 and PL5 credible analysis desktop application"
 requires-python = ">=3.11"
 dependencies = [
