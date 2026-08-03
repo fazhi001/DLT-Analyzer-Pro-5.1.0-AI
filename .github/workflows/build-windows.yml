@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       publish_release:
-        description: "构建成功后同时发布 v5.1.0 GitHub Release"
+        description: "构建成功后同时发布 v5.1.1 GitHub Release"
         required: true
         type: boolean
         default: false
@@ -113,19 +113,19 @@ jobs:
         shell: pwsh
         run: |
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "installer\DLTAnalyzerPro.iss"
-          if (!(Test-Path "release\DLT_Analyzer_Pro_5.1.0_3Games_Setup_x64.exe")) {
+          if (!(Test-Path "release\DLT_Analyzer_Pro_5.1.1_3Games_Setup_x64.exe")) {
             throw "Installer was not generated"
           }
 
       - name: Create portable package and checksums
         shell: pwsh
         run: |
-          $portable = "release\DLT_Analyzer_Pro_5.1.0_3Games_Portable_x64.zip"
+          $portable = "release\DLT_Analyzer_Pro_5.1.1_3Games_Portable_x64.zip"
           if (Test-Path $portable) { Remove-Item $portable -Force }
           Compress-Archive -Path "dist\DLTAnalyzerPro\*" -DestinationPath $portable -CompressionLevel Optimal
 
           $assets = @(
-            "release\DLT_Analyzer_Pro_5.1.0_3Games_Setup_x64.exe",
+            "release\DLT_Analyzer_Pro_5.1.1_3Games_Setup_x64.exe",
             $portable
           )
           $lines = foreach ($asset in $assets) {
@@ -138,27 +138,27 @@ jobs:
       - name: Upload installer
         uses: actions/upload-artifact@v7
         with:
-          name: DLT-Analyzer-Pro-5.1.0-3Games-Setup-x64
-          path: release/DLT_Analyzer_Pro_5.1.0_3Games_Setup_x64.exe
+          name: DLT-Analyzer-Pro-5.1.1-3Games-Setup-x64
+          path: release/DLT_Analyzer_Pro_5.1.1_3Games_Setup_x64.exe
           if-no-files-found: error
           retention-days: 30
 
       - name: Upload portable application
         uses: actions/upload-artifact@v7
         with:
-          name: DLT-Analyzer-Pro-5.1.0-3Games-Portable-x64
-          path: release/DLT_Analyzer_Pro_5.1.0_3Games_Portable_x64.zip
+          name: DLT-Analyzer-Pro-5.1.1-3Games-Portable-x64
+          path: release/DLT_Analyzer_Pro_5.1.1_3Games_Portable_x64.zip
           if-no-files-found: error
           retention-days: 30
 
       - name: Upload release metadata
         uses: actions/upload-artifact@v7
         with:
-          name: DLT-Analyzer-Pro-5.1.0-Release-Metadata
+          name: DLT-Analyzer-Pro-5.1.1-Release-Metadata
           path: |
             release/SHA256SUMS.txt
             release/VERSION.txt
-            RELEASE_NOTES_5.1.0.md
+            RELEASE_NOTES_5.1.1.md
           if-no-files-found: error
           retention-days: 90
 
@@ -168,7 +168,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = "v5.1.0"
+          $tag = "v5.1.1"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch --tags --force
@@ -178,8 +178,8 @@ jobs:
           }
 
           $assets = @(
-            "release\DLT_Analyzer_Pro_5.1.0_3Games_Setup_x64.exe",
-            "release\DLT_Analyzer_Pro_5.1.0_3Games_Portable_x64.zip",
+            "release\DLT_Analyzer_Pro_5.1.1_3Games_Setup_x64.exe",
+            "release\DLT_Analyzer_Pro_5.1.1_3Games_Portable_x64.zip",
             "release\SHA256SUMS.txt",
             "release\VERSION.txt"
           )
@@ -189,5 +189,5 @@ jobs:
           } else {
             gh release create $tag @assets `
               --title "DLT Analyzer Pro 5.1 三种彩票可信分析版" `
-              --notes-file "RELEASE_NOTES_5.1.0.md"
+              --notes-file "RELEASE_NOTES_5.1.1.md"
           }
