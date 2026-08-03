@@ -38,6 +38,7 @@ class AIStudioWindow:
         self.current_dynamic_result = None
         self.current_backtest_result = None
         self.running = False
+        self.cancel_event = threading.Event()
 
         self.status_var = tk.StringVar(value="就绪")
         self.progress_var = tk.DoubleVar(value=0.0)
@@ -107,6 +108,8 @@ class AIStudioWindow:
         footer = ttk.Frame(outer)
         footer.pack(fill="x", pady=(10, 0))
         ttk.Progressbar(footer, variable=self.progress_var, maximum=100.0).pack(side="left", fill="x", expand=True)
+        self.cancel_button = ttk.Button(footer, text="请求停止", command=self.request_cancel, state="disabled")
+        self.cancel_button.pack(side="right", padx=(12, 0))
         ttk.Label(footer, textvariable=self.status_var, width=50, anchor="e").pack(side="right", padx=(12, 0))
 
     def _build_prediction_tab(self) -> None:
@@ -114,6 +117,7 @@ class AIStudioWindow:
         flow.pack(fill="x", pady=(0, 10))
         ttk.Label(flow, text="自动备份 → 泄漏检查 → 自动更新 → 滚动回测 → 概率校准 → 版本化训练 → 百万次模拟 → 保存结果", foreground="#374151").pack(side="left")
         ttk.Label(flow, textvariable=self.autopilot_summary_var, foreground="#2563EB").pack(side="right")
+        ttk.Label(self.predict_tab, text="可信规则：只有样本外验证未劣于基线的模型才会参与概率排序；否则自动使用统计基线。", foreground="#2563EB").pack(anchor="w", pady=(0, 10))
 
         controls = ttk.LabelFrame(self.predict_tab, text="运行参数", padding=12)
         controls.pack(fill="x", pady=(0, 10))
@@ -130,7 +134,7 @@ class AIStudioWindow:
             widget.grid(row=1, column=index, padx=5, pady=4)
         self.autopilot_button = ttk.Button(controls, text="一键自适应预测", command=self.run_autopilot)
         self.autopilot_button.grid(row=0, column=6, rowspan=2, padx=(18, 5), sticky="ns")
-        self.run_button = ttk.Button(controls, text="按当前权重预测", command=self.run_prediction)
+        self.run_button = ttk.Button(controls, text="统计备用模式", command=self.run_prediction)
         self.run_button.grid(row=0, column=7, rowspan=2, padx=5, sticky="ns")
         ttk.Button(controls, text="导出报告", command=self.export_predictions).grid(row=0, column=8, rowspan=2, padx=5, sticky="ns")
 
@@ -166,6 +170,14 @@ class AIStudioWindow:
             foreground="#2563EB",
             font=("Microsoft YaHei UI", 10, "bold"),
         ).pack(anchor="w", pady=(0, 8))
+        self.trust_conclusion_var = tk.StringVar(value="可信结论：请先运行滚动评估。")
+        ttk.Label(
+            self.model_tab,
+            textvariable=self.trust_conclusion_var,
+            foreground="#374151",
+            font=("Microsoft YaHei UI", 10),
+            wraplength=920,
+        ).pack(anchor="w", pady=(0, 10))
 
         ttk.Label(self.model_tab, text="模型排行榜（滚动样本外表现）", font=("Microsoft YaHei UI", 11, "bold")).pack(anchor="w")
         self.ranking_tree = ttk.Treeview(self.model_tab, columns=("rank", "model", "weight", "trend", "fh", "bh", "fb", "bb", "score"), show="headings", height=8)
@@ -422,6 +434,8 @@ class AIStudioWindow:
 
     def _set_running(self, running: bool) -> None:
         self.running = running
+        if running:
+            self.cancel_event.clear()
         state = "disabled" if running else "normal"
         buttons = [self.autopilot_button, self.run_button, self.dynamic_button, self.backtest_button, self.optimize_button]
         if hasattr(self, "backtest_export_button"):
@@ -432,9 +446,27 @@ class AIStudioWindow:
                 buttons.append(getattr(self, name))
         for button in buttons:
             button.configure(state=state)
+        self.cancel_button.configure(state="normal" if running else "disabled")
 
     def _progress(self, text: str, value: float) -> None:
+        if self.cancel_event.is_set():
+            raise RuntimeError("用户已请求停止；未保存本次未完成结果")
         self.window.after(0, lambda: (self.status_var.set(text), self.progress_var.set(value * 100.0)))
+
+    def request_cancel(self) -> None:
+        if not self.running:
+            return
+        self.cancel_event.set()
+        self.cancel_button.configure(state="disabled")
+        self.status_var.set("正在安全停止：当前计算节点完成后不会保存本次结果…")
+
+    def show_task_error(self, title: str, error: Exception) -> None:
+        message = str(error)
+        if "用户已请求停止" in message:
+            self.status_var.set("本次任务已安全停止，未保存未完成结果。")
+            self.progress_var.set(0.0)
+            return
+        messagebox.showerror(title, message)
 
     @staticmethod
     def _clear_tree(tree: ttk.Treeview) -> None:
@@ -461,7 +493,7 @@ class AIStudioWindow:
                 self.window.after(0, lambda: self._display_autopilot(result))
             except Exception as exc:
                 self.window.after(0, lambda: self.status_var.set("一键流程失败"))
-                self.window.after(0, lambda: messagebox.showerror("一键预测失败", str(exc)))
+                self.window.after(0, lambda value=exc: self.show_task_error("一键预测失败", value))
             finally:
                 self.window.after(0, lambda: self._set_running(False))
         threading.Thread(target=worker, daemon=True).start()
@@ -495,7 +527,7 @@ class AIStudioWindow:
                 self.database.save_predictions(target, predictions)
                 self.window.after(0, lambda: self._display_prediction(predictions, report))
             except Exception as exc:
-                self.window.after(0, lambda: messagebox.showerror("AI预测失败", str(exc)))
+                self.window.after(0, lambda value=exc: self.show_task_error("AI预测失败", value))
             finally:
                 self.window.after(0, lambda: self._set_running(False))
         threading.Thread(target=worker, daemon=True).start()
@@ -532,7 +564,7 @@ class AIStudioWindow:
                 )
                 self.window.after(0, lambda: self._display_dynamic(result))
             except Exception as exc:
-                self.window.after(0, lambda: messagebox.showerror("动态调权失败", str(exc)))
+                self.window.after(0, lambda value=exc: self.show_task_error("动态调权失败", value))
             finally:
                 self.window.after(0, lambda: self._set_running(False))
         threading.Thread(target=worker, daemon=True).start()
@@ -558,8 +590,16 @@ class AIStudioWindow:
         self.guard_summary_var.set(
             f"基线保护：前区模型{result.front_model_share:.0%} / 基线{1-result.front_model_share:.0%}，"
             f"BSS {result.front_bss:+.2%}；后区模型{result.back_model_share:.0%} / "
-            f"基线{1-result.back_model_share:.0%}，BSS {result.back_bss:+.2%}"
+            f"基线{1-result.back_model_share:.0%}，BSS {result.back_bss:+.2%}；"
+            f"模型分歧 前区{result.front_uncertainty:.1%} / 后区{result.back_uncertainty:.1%}"
         )
+        if result.front_model_share == 0.0 and result.back_model_share == 0.0:
+            conclusion = "当前可信结论：未证实模型优于基线，AI已完全降级为统计基线。"
+        elif result.front_model_share < 0.5 or result.back_model_share < 0.5:
+            conclusion = "当前可信结论：模型优势不稳定，已大幅降低AI参与比例；候选仅作保守排序参考。"
+        else:
+            conclusion = "当前可信结论：模型通过当前滚动保护，可参与排序；仍不构成对未来开奖的保证。"
+        self.trust_conclusion_var.set(conclusion)
         self.status_var.set(
             f"基线保护完成：回测{result.periods}期｜前区模型{result.front_model_share:.0%}｜"
             f"后区模型{result.back_model_share:.0%}｜置信度{result.confidence:.1%}"
@@ -656,7 +696,7 @@ class AIStudioWindow:
                 self.window.after(0, lambda: self._display_backtest(result))
             except Exception as exc:
                 self.window.after(0, lambda: self.status_var.set("可信回测失败"))
-                self.window.after(0, lambda: messagebox.showerror("可信回测失败", str(exc)))
+                self.window.after(0, lambda value=exc: self.show_task_error("可信回测失败", value))
             finally:
                 self.window.after(0, lambda: self._set_running(False))
         threading.Thread(target=worker, daemon=True).start()
@@ -729,7 +769,7 @@ class AIStudioWindow:
                 )
                 self.window.after(0, lambda: self._display_optimization(result))
             except Exception as exc:
-                self.window.after(0, lambda: messagebox.showerror("参数优化失败", str(exc)))
+                self.window.after(0, lambda value=exc: self.show_task_error("参数优化失败", value))
             finally:
                 self.window.after(0, lambda: self._set_running(False))
         threading.Thread(target=worker, daemon=True).start()
