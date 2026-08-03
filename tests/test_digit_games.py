@@ -6,7 +6,12 @@ from pathlib import Path
 from dlt_analyzer_pro.database import Database
 from dlt_analyzer_pro.digit_backtest import rolling_digit_backtest
 from dlt_analyzer_pro.digit_model import DigitPredictionEngine, digit_analysis_rows
-from dlt_analyzer_pro.digit_updater import OfficialDigitUpdater, derive_pl3, parse_pl5_payload
+from dlt_analyzer_pro.digit_updater import (
+    OfficialDigitUpdater,
+    build_pl5_api_url,
+    derive_pl3,
+    parse_pl5_payload,
+)
 from dlt_analyzer_pro.models import DigitDraw
 
 
@@ -40,6 +45,7 @@ def test_digit_database_isolated(tmp_path: Path):
 
 
 def test_official_payload_and_sync(tmp_path: Path):
+    assert "gameNo=350133" in build_pl5_api_url(1)
     payload = {
         "success": True,
         "value": {
