@@ -14,7 +14,7 @@ from .ai_types import (
     DynamicWeightResult,
     ModelPerformance,
 )
-from .baseline_guard import fit_baseline_guard
+from .baseline_guard import blend_with_uniform, fit_baseline_guard
 from .models import Draw
 
 
@@ -74,6 +74,55 @@ def _current_vector(current_weights: dict[str, float] | None) -> np.ndarray:
     return vector
 
 
+def _recency_weights(size: int, decay: float) -> np.ndarray:
+    """Normalized chronological weights; newest out-of-sample fold gets most weight."""
+    count = max(1, int(size))
+    factor = float(np.clip(decay, 0.80, 1.0))
+    values = factor ** np.arange(count - 1, -1, -1, dtype=float)
+    return values / values.sum()
+
+
+def _weighted_average(values: list[float], weights: np.ndarray) -> float:
+    data = np.asarray(values, dtype=float)
+    if len(data) != len(weights):
+        raise ValueError("metrics and recency weights must be aligned")
+    return float(np.dot(data, weights))
+
+
+def _ensemble_uncertainty(
+    folds: list[dict[str, np.ndarray]],
+    weights: dict[str, float],
+    recent_folds: int = 10,
+) -> float:
+    """Average component disagreement in total-variation distance (0=agreement)."""
+    sample = folds[-max(1, int(recent_folds)):]
+    distances: list[float] = []
+    for components in sample:
+        ensemble = _weighted_ensemble(components, weights)
+        component_distance = [
+            0.5 * float(np.abs(probability - ensemble).sum())
+            for probability in components.values()
+        ]
+        distances.append(float(np.mean(component_distance)))
+    return float(np.clip(np.mean(distances) if distances else 1.0, 0.0, 1.0))
+
+
+def _uncertainty_guarded_share(
+    share: float,
+    uncertainty: float,
+    probabilities: list[np.ndarray],
+    targets: list[np.ndarray],
+    picks: int,
+) -> float:
+    """Shrink model influence when components disagree, never keeping a worse-than-baseline blend."""
+    proposed = float(np.clip(share * max(0.25, 1.0 - uncertainty), 0.0, 1.0))
+    if not probabilities:
+        return 0.0
+    protected = [_brier(blend_with_uniform(item, proposed), target, picks) for item, target in zip(probabilities, targets, strict=True)]
+    baseline = [_brier(np.full(item.size, 1.0 / item.size), target, picks) for item, target in zip(probabilities, targets, strict=True)]
+    return proposed if float(np.mean(protected)) <= float(np.mean(baseline)) + 1e-12 else 0.0
+
+
 def _zone_weight_vector(
     rows: list[dict[str, float]],
     zone: str,
@@ -106,6 +155,7 @@ def evaluate_dynamic_weights(
     estimators: int = 140,
     include_ml: bool = True,
     calibrate: bool = True,
+    recency_decay: float = 0.97,
     seed: int = 20260721,
     progress=None,
 ) -> DynamicWeightResult:
@@ -182,14 +232,15 @@ def evaluate_dynamic_weights(
         guard_periods = holdout_count
 
     rows: list[dict[str, float | str]] = []
+    selection_weights = _recency_weights(selection_count, recency_decay)
     for name in COMPONENT_NAMES:
         rows.append(
             {
                 "name": name,
-                "front_brier": float(np.mean(metrics[name]["front_brier"][:selection_count])),
-                "back_brier": float(np.mean(metrics[name]["back_brier"][:selection_count])),
-                "front_hits": float(np.mean(metrics[name]["front_hits"][:selection_count])),
-                "back_hits": float(np.mean(metrics[name]["back_hits"][:selection_count])),
+                "front_brier": _weighted_average(metrics[name]["front_brier"][:selection_count], selection_weights),
+                "back_brier": _weighted_average(metrics[name]["back_brier"][:selection_count], selection_weights),
+                "front_hits": _weighted_average(metrics[name]["front_hits"][:selection_count], selection_weights),
+                "back_hits": _weighted_average(metrics[name]["back_hits"][:selection_count], selection_weights),
             }
         )
 
@@ -216,6 +267,16 @@ def evaluate_dynamic_weights(
         picks=2,
         bootstrap_samples=max(1000, min(5000, guard_periods * 100)),
         seed=seed + 81_002,
+    )
+    front_uncertainty = _ensemble_uncertainty(front_folds[:selection_count], front_weights)
+    back_uncertainty = _ensemble_uncertainty(back_folds[:selection_count], back_weights)
+    front_share = _uncertainty_guarded_share(
+        front_guard.model_share, front_uncertainty,
+        front_probabilities[guard_start:], front_targets[guard_start:], 5,
+    )
+    back_share = _uncertainty_guarded_share(
+        back_guard.model_share, back_uncertainty,
+        back_probabilities[guard_start:], back_targets[guard_start:], 2,
     )
 
     # The six weights shown in the legacy UI remain a front/back weighted summary.
@@ -253,13 +314,19 @@ def evaluate_dynamic_weights(
         generated_at=datetime.now().isoformat(timespec="seconds"),
         front_weights=front_weights,
         back_weights=back_weights,
-        front_model_share=front_guard.model_share,
-        back_model_share=back_guard.model_share,
+        front_model_share=front_share,
+        back_model_share=back_share,
         front_bss=front_guard.raw_bss,
         back_bss=back_guard.raw_bss,
         front_bss_ci_lower=front_guard.bss_ci_lower,
         front_bss_ci_upper=front_guard.bss_ci_upper,
         back_bss_ci_lower=back_guard.bss_ci_lower,
         back_bss_ci_upper=back_guard.bss_ci_upper,
-        guard_notes=(front_guard.reason, back_guard.reason),
+        guard_notes=(
+            front_guard.reason,
+            back_guard.reason,
+            f"模型分歧：前区{front_uncertainty:.1%}，后区{back_uncertainty:.1%}；已据此收缩AI权重。",
+        ),
+        front_uncertainty=front_uncertainty,
+        back_uncertainty=back_uncertainty,
     )
