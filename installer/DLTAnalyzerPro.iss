@@ -1,5 +1,5 @@
-#define MyAppName "DLT Analyzer Pro 5.1 三种彩票可信分析版"
-#define MyAppVersion "5.1.0"
+#define MyAppName "DLT Analyzer Pro 5.1.1 三种彩票可信分析版"
+#define MyAppVersion "5.1.1"
 #define MyAppPublisher "DLT Analyzer Pro"
 #define MyAppExeName "DLTAnalyzerPro.exe"
 
@@ -12,7 +12,7 @@ DefaultDirName={localappdata}\Programs\DLT Analyzer Pro AI
 DefaultGroupName={#MyAppName}
 PrivilegesRequired=lowest
 OutputDir=..\release
-OutputBaseFilename=DLT_Analyzer_Pro_5.1.0_3Games_Setup_x64
+OutputBaseFilename=DLT_Analyzer_Pro_5.1.1_3Games_Setup_x64
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
