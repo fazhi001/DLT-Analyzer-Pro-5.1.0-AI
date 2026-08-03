@@ -10,7 +10,10 @@ from .models import DigitDraw
 from .updater import API_URL, SOURCE_NAME, UpdateError, fetch_json
 
 
-PL5_GAME_NO = "35"
+# ``35`` is the API identifier for 排列三.  The official history endpoint
+# uses ``350133`` for 排列五; using 35 returns three-digit records that are
+# correctly rejected by the PL5 parser but leaves an empty local history.
+PL5_GAME_NO = "350133"
 PL5_SOURCE_PAGE_URL = "https://www.lottery.gov.cn/kj/kjlb.html?plw"
 DEFAULT_START_ISSUE = "04001"
 
