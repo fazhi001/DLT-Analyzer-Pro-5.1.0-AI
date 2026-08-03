@@ -5,7 +5,11 @@ from pathlib import Path
 
 from dlt_analyzer_pro.database import Database
 from dlt_analyzer_pro.digit_backtest import rolling_digit_backtest
-from dlt_analyzer_pro.digit_model import DigitPredictionEngine, digit_analysis_rows
+from dlt_analyzer_pro.digit_model import (
+    DigitPredictionEngine,
+    digit_analysis_rows,
+    prediction_brief,
+)
 from dlt_analyzer_pro.digit_updater import (
     OfficialDigitUpdater,
     build_pl5_api_url,
@@ -78,6 +82,9 @@ def test_digit_prediction_and_analysis(tmp_path: Path):
     assert len({item.digits for item in predictions}) == 12
     rows = digit_analysis_rows(draws)
     assert len(rows) == 50
+    summary = prediction_brief(predictions)
+    assert "已生成 12 注候选" in summary
+    assert predictions[0].number_text in summary
 
 
 def test_digit_model_training_is_position_specific(tmp_path: Path):
