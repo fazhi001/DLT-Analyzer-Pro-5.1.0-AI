@@ -50,6 +50,7 @@ class AIConfig:
     ml_estimators: int = 140
     dynamic_periods: int = 30
     dynamic_learning_rate: float = 0.20
+    recency_decay: float = 0.97
     auto_update: bool = True
     deterministic: bool = True
     probability_calibration: bool = True
@@ -129,6 +130,8 @@ class DynamicWeightResult:
     back_bss_ci_lower: float = 0.0
     back_bss_ci_upper: float = 0.0
     guard_notes: tuple[str, ...] = ()
+    front_uncertainty: float = 0.0
+    back_uncertainty: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
