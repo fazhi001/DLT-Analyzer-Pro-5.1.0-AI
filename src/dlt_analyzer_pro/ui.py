@@ -45,6 +45,7 @@ class DLTApplication:
         self.root = root
         self.database = database
         self.current_predictions: list[Prediction] = []
+        self.prediction_advanced_visible = False
         self.pages: dict[str, ttk.Frame] = {}
         self.update_in_progress = False
         self.auto_update_timer: str | None = None
@@ -97,6 +98,8 @@ class DLTApplication:
         style.configure("TNotebook.Tab", padding=(18, 9), font=("Microsoft YaHei UI", 10))
         style.configure("TLabelframe", background=PANEL, bordercolor=BORDER)
         style.configure("TLabelframe.Label", background=PANEL, foreground=TEXT, font=("Microsoft YaHei UI", 10, "bold"))
+        style.configure("Quick.TLabelframe", background=PANEL, borderwidth=0, relief="flat")
+        style.configure("Quick.TLabelframe.Label", background=PANEL, foreground=ACCENT, font=("Microsoft YaHei UI", 10, "bold"))
 
     def _build_shell(self) -> None:
         shell = tk.Frame(self.root, bg=BG)
@@ -118,7 +121,7 @@ class DLTApplication:
         buttons = [
             ("dashboard", "首页概览"),
             ("history", "历史开奖"),
-            ("analysis", "号码分析"),
+            ("analysis", "模型可信度"),
             ("prediction", "智能选号"),
             ("backtest", "前向验证"),
             ("prediction_history", "预测记录"),
@@ -225,6 +228,25 @@ class DLTApplication:
 
     def _build_dashboard(self) -> None:
         page = self._new_page("dashboard")
+        game_hub = ttk.Frame(page, style="App.TFrame")
+        game_hub.pack(fill="x", pady=(0, 16))
+        self.dashboard_dlt_status = tk.StringVar(value="正在读取数据…")
+        self.dashboard_pl3_status = tk.StringVar(value="正在读取数据…")
+        self.dashboard_pl5_status = tk.StringVar(value="正在读取数据…")
+        game_specs = [
+            ("大乐透", "5 前区 + 2 后区", self.dashboard_dlt_status, "进入大乐透分析", lambda: self.show_page("prediction")),
+            ("排列三", "3 位数字 · 统计排序", self.dashboard_pl3_status, "进入排列三", lambda: self.open_digit_games("pl3")),
+            ("排列五", "5 位数字 · 统计排序", self.dashboard_pl5_status, "进入排列五", lambda: self.open_digit_games("pl5")),
+        ]
+        for index, (name, caption, status, action, command) in enumerate(game_specs):
+            card = self._panel(game_hub, 16)
+            card.grid(row=0, column=index, sticky="nsew", padx=(0 if index == 0 else 6, 0 if index == 2 else 6))
+            ttk.Label(card, text=name, style="PanelTitle.TLabel").pack(anchor="w")
+            ttk.Label(card, text=caption, style="CardLabel.TLabel").pack(anchor="w", pady=(3, 10))
+            ttk.Label(card, textvariable=status, style="CardValue.TLabel").pack(anchor="w")
+            ttk.Button(card, text=action, style="Secondary.TButton", command=command).pack(anchor="w", pady=(12, 0))
+            game_hub.columnconfigure(index, weight=1)
+
         cards = ttk.Frame(page, style="App.TFrame")
         cards.pack(fill="x")
 
@@ -275,8 +297,8 @@ class DLTApplication:
         action_panel = self._panel(content)
         action_panel.pack(side="left", fill="y", padx=(8, 0))
         ttk.Label(action_panel, text="快捷操作", style="PanelTitle.TLabel").pack(anchor="w", pady=(0, 12))
-        ttk.Button(action_panel, text="进入一键AI系统", style="Accent.TButton", command=self.open_ai_studio).pack(fill="x", pady=5)
-        ttk.Button(action_panel, text="生成 10 注统计号码", style="Secondary.TButton", command=self.quick_predict).pack(fill="x", pady=5)
+        ttk.Button(action_panel, text="运行可信 AI 评估", style="Accent.TButton", command=self.open_ai_studio).pack(fill="x", pady=5)
+        ttk.Button(action_panel, text="生成 5 注统计候选", style="Secondary.TButton", command=self.quick_predict).pack(fill="x", pady=5)
         ttk.Button(action_panel, text="在线更新开奖", style="Secondary.TButton", command=lambda: self.update_online(manual=True)).pack(fill="x", pady=5)
         ttk.Button(action_panel, text="一键同步三种彩票", style="Accent.TButton", command=self.sync_all_games).pack(fill="x", pady=5)
         ttk.Button(action_panel, text="官网全量校验", style="Secondary.TButton", command=lambda: self.update_online(manual=True, full_sync=True)).pack(fill="x", pady=5)
@@ -346,6 +368,7 @@ class DLTApplication:
         window_box.pack(side="left")
         window_box.bind("<<ComboboxSelected>>", lambda _event: self.refresh_analysis())
         ttk.Button(controls, text="刷新分析", style="Secondary.TButton", command=self.refresh_analysis).pack(side="left", padx=8)
+        ttk.Button(controls, text="打开可信AI评估", style="Accent.TButton", command=self.open_ai_studio).pack(side="left")
         self.analysis_summary_var = tk.StringVar()
         ttk.Label(controls, textvariable=self.analysis_summary_var, style="Sub.TLabel").pack(side="right")
 
@@ -354,25 +377,24 @@ class DLTApplication:
 
         front_tab = ttk.Frame(notebook, style="Panel.TFrame", padding=12)
         back_tab = ttk.Frame(notebook, style="Panel.TFrame", padding=12)
-        notebook.add(front_tab, text="前区 01—35")
-        notebook.add(back_tab, text="后区 01—12")
+        notebook.add(front_tab, text="前区数据分布 01—35")
+        notebook.add(back_tab, text="后区数据分布 01—12")
 
         self.front_analysis_tree = ttk.Treeview(
             front_tab,
-            columns=("number", "frequency", "omission", "status"),
+            columns=("number", "frequency", "omission"),
             show="headings",
         )
         self.back_analysis_tree = ttk.Treeview(
             back_tab,
-            columns=("number", "frequency", "omission", "status"),
+            columns=("number", "frequency", "omission"),
             show="headings",
         )
         for tree in (self.front_analysis_tree, self.back_analysis_tree):
             for column, title, width in [
                 ("number", "号码", 100),
                 ("frequency", "出现次数", 130),
-                ("omission", "当前遗漏", 130),
-                ("status", "状态", 140),
+                ("omission", "距上次出现", 130),
             ]:
                 tree.heading(column, text=title)
                 tree.column(column, width=width, anchor="center")
@@ -380,41 +402,48 @@ class DLTApplication:
 
     def _build_prediction(self) -> None:
         page = self._new_page("prediction")
-        controls = ttk.LabelFrame(page, text="选号参数", padding=14)
-        controls.pack(fill="x", pady=(0, 12))
+        quick = ttk.LabelFrame(page, text="下一期快速选号", style="Quick.TLabelframe", padding=(14, 12))
+        quick.pack(fill="x", pady=(0, 12))
+        self.prediction_brief_var = tk.StringVar(value="先运行可信AI评估：仅在样本外验证未劣于基线时，模型才参与概率排序。")
+        ttk.Label(quick, textvariable=self.prediction_brief_var, style="PanelTitle.TLabel").pack(side="left")
+        ttk.Button(quick, text="运行可信 AI 评估", style="Accent.TButton", command=self.open_ai_studio).pack(side="right")
+        ttk.Button(quick, text="生成统计候选 5 注", style="Secondary.TButton", command=self.generate_quick_predictions).pack(side="right", padx=(0, 8))
+        self.prediction_advanced_button = ttk.Button(quick, text="高级设置", style="Secondary.TButton", command=self.toggle_prediction_advanced)
+        self.prediction_advanced_button.pack(side="right", padx=(0, 8))
 
-        ttk.Label(controls, text="策略：").grid(row=0, column=0, padx=(0, 6), pady=4)
+        self.prediction_controls = ttk.Frame(page, style="App.TFrame")
+        ttk.Label(self.prediction_controls, text="策略：").grid(row=0, column=0, padx=(0, 6), pady=4)
         self.strategy_var = tk.StringVar(value="均衡模式")
         ttk.Combobox(
-            controls,
+            self.prediction_controls,
             textvariable=self.strategy_var,
-            values=tuple(STRATEGIES.keys()),
+            values=("均衡模式",),
             state="readonly",
             width=12,
         ).grid(row=0, column=1, padx=(0, 20), pady=4)
 
-        ttk.Label(controls, text="注数：").grid(row=0, column=2, padx=(0, 6), pady=4)
-        self.prediction_count_var = tk.IntVar(value=10)
+        ttk.Label(self.prediction_controls, text="注数：").grid(row=0, column=2, padx=(0, 6), pady=4)
+        self.prediction_count_var = tk.IntVar(value=5)
         ttk.Spinbox(
-            controls,
+            self.prediction_controls,
             from_=1,
             to=50,
             textvariable=self.prediction_count_var,
             width=7,
         ).grid(row=0, column=3, padx=(0, 20), pady=4)
 
-        ttk.Label(controls, text="目标期号：").grid(row=0, column=4, padx=(0, 6), pady=4)
+        ttk.Label(self.prediction_controls, text="目标期号：").grid(row=0, column=4, padx=(0, 6), pady=4)
         self.target_issue_var = tk.StringVar()
-        ttk.Entry(controls, textvariable=self.target_issue_var, width=14).grid(row=0, column=5, padx=(0, 20), pady=4)
+        ttk.Entry(self.prediction_controls, textvariable=self.target_issue_var, width=14).grid(row=0, column=5, padx=(0, 20), pady=4)
 
         ttk.Button(
-            controls,
-            text="开始生成",
+            self.prediction_controls,
+            text="按当前设置生成",
             style="Accent.TButton",
             command=self.generate_predictions,
         ).grid(row=0, column=6, padx=4)
         ttk.Button(
-            controls,
+            self.prediction_controls,
             text="导出 XLSX",
             style="Secondary.TButton",
             command=self.export_predictions,
@@ -436,7 +465,22 @@ class DLTApplication:
         ]:
             self.prediction_tree.heading(column, text=title)
             self.prediction_tree.column(column, width=width, anchor="center")
+        self.prediction_tree.tag_configure("top", background="#EAF2FF")
         self.prediction_tree.pack(fill="both", expand=True)
+
+    def toggle_prediction_advanced(self) -> None:
+        self.prediction_advanced_visible = not self.prediction_advanced_visible
+        if self.prediction_advanced_visible:
+            self.prediction_controls.pack(fill="x", pady=(0, 12), before=self.prediction_tree.master)
+            self.prediction_advanced_button.configure(text="收起高级设置")
+        else:
+            self.prediction_controls.pack_forget()
+            self.prediction_advanced_button.configure(text="高级设置")
+
+    def generate_quick_predictions(self) -> None:
+        self.strategy_var.set("均衡模式")
+        self.prediction_count_var.set(5)
+        self.generate_predictions()
 
     def _build_backtest(self) -> None:
         page = self._new_page("backtest")
@@ -458,7 +502,7 @@ class DLTApplication:
         ttk.Combobox(
             controls,
             textvariable=self.backtest_strategy_var,
-            values=tuple(STRATEGIES.keys()),
+            values=("均衡模式",),
             state="readonly",
             width=12,
         ).pack(side="left", padx=(4, 18))
@@ -569,23 +613,29 @@ class DLTApplication:
     def open_ai_studio(self) -> None:
         AIStudioWindow(self.root, self.database)
 
-    def open_digit_games(self) -> None:
+    def open_digit_games(self, game: str | None = None) -> None:
         if (
             self.digit_games_window is not None
             and self.digit_games_window.window.winfo_exists()
         ):
+            if game:
+                self.digit_games_window.game_var.set("排列三" if game == "pl3" else "排列五")
+                self.digit_games_window._change_game()
             self.digit_games_window.window.deiconify()
             self.digit_games_window.window.lift()
             self.digit_games_window.window.focus_force()
             return
         self.digit_games_window = DigitGamesWindow(self.root, self.database)
+        if game:
+            self.digit_games_window.game_var.set("排列三" if game == "pl3" else "排列五")
+            self.digit_games_window._change_game()
 
     def show_page(self, key: str) -> None:
         titles = {
             "dashboard": ("首页概览", "查看数据状态和最近开奖"),
             "history": ("历史开奖", "导入、浏览、导出和备份开奖数据"),
-            "analysis": ("号码分析", "查看频率、冷热状态和当前遗漏"),
-            "prediction": ("智能选号", "基于历史统计生成多样化组合"),
+            "analysis": ("模型可信度", "数据分布仅作参考；可信AI使用样本外验证和基线保护"),
+            "prediction": ("智能选号", "可信AI优先；未通过验证时自动降级为统计候选"),
             "backtest": ("前向验证", "使用过去数据模拟真实的逐期预测"),
             "prediction_history": ("预测记录", "按北京时间查看、筛选并安全清理历史预测"),
         }
@@ -615,6 +665,13 @@ class DLTApplication:
         self.dashboard_count.set(str(count))
         self.dashboard_latest.set(latest or "-")
         self.dashboard_sum.set(f'{info["average_sum"]:.1f}' if recent else "-")
+        self.dashboard_dlt_status.set(f"{count} 期 · 最新 {latest or '-'}")
+        pl3_count = self.database.digit_draw_count("pl3")
+        pl5_count = self.database.digit_draw_count("pl5")
+        pl3_latest = self.database.latest_digit_issue("pl3") or "-"
+        pl5_latest = self.database.latest_digit_issue("pl5") or "-"
+        self.dashboard_pl3_status.set(f"{pl3_count} 期 · 最新 {pl3_latest}")
+        self.dashboard_pl5_status.set(f"{pl5_count} 期 · 最新 {pl5_latest}")
         self.target_issue_var.set(next_issue(latest))
         self.history_count_var.set(f"共 {count} 期")
 
@@ -664,16 +721,8 @@ class DLTApplication:
         if not draws:
             return
         front_rows, back_rows = analysis_rows(draws)
-        front_freq_values = sorted(row["frequency"] for row in front_rows)
-        back_freq_values = sorted(row["frequency"] for row in back_rows)
-        front_hot = front_freq_values[-8]
-        front_cold = front_freq_values[7]
-        back_hot = back_freq_values[-3]
-        back_cold = back_freq_values[2]
-
         self._clear_tree(self.front_analysis_tree)
         for row in front_rows:
-            status = "热" if row["frequency"] >= front_hot else "冷" if row["frequency"] <= front_cold else "中性"
             self.front_analysis_tree.insert(
                 "",
                 "end",
@@ -681,13 +730,11 @@ class DLTApplication:
                     f'{row["number"]:02d}',
                     row["frequency"],
                     row["omission"],
-                    status,
                 ),
             )
 
         self._clear_tree(self.back_analysis_tree)
         for row in back_rows:
-            status = "热" if row["frequency"] >= back_hot else "冷" if row["frequency"] <= back_cold else "中性"
             self.back_analysis_tree.insert(
                 "",
                 "end",
@@ -695,20 +742,18 @@ class DLTApplication:
                     f'{row["number"]:02d}',
                     row["frequency"],
                     row["omission"],
-                    status,
                 ),
             )
 
         info = summary(draws)
         self.analysis_summary_var.set(
-            f'{len(draws)}期｜平均和值 {info["average_sum"]:.1f}｜'
-            f'平均奇数 {info["average_odd"]:.2f}｜'
-            f'含连号比例 {info["consecutive_rate"]:.1%}'
+            f'统计窗口 {len(draws)} 期｜平均和值 {info["average_sum"]:.1f}｜'
+            "此页不用于预测评分；请在可信AI评估中查看样本外验证。"
         )
 
     def quick_predict(self) -> None:
         self.strategy_var.set("均衡模式")
-        self.prediction_count_var.set(10)
+        self.prediction_count_var.set(5)
         self.show_page("prediction")
         self.generate_predictions()
 
@@ -732,6 +777,7 @@ class DLTApplication:
                 self.prediction_tree.insert(
                     "",
                     "end",
+                    tags=("top",) if index <= 3 else (),
                     values=(
                         index,
                         " ".join(f"{n:02d}" for n in prediction.front),
@@ -741,6 +787,13 @@ class DLTApplication:
                     ),
                 )
             self.refresh_prediction_history()
+            preview = "、".join(
+                f"{' '.join(f'{n:02d}' for n in item.front)} + {' '.join(f'{n:02d}' for n in item.back)}"
+                for item in predictions[:3]
+            )
+            self.prediction_brief_var.set(
+                f"已生成 {len(predictions)} 注候选｜前 {min(3, len(predictions))} 注：{preview}｜结果仅供统计参考。"
+            )
             self.footer_var.set(f"已生成并保存 {len(predictions)} 注组合。")
         except Exception as exc:
             messagebox.showerror("生成失败", str(exc))
@@ -1086,8 +1139,9 @@ class DLTApplication:
         self.update_in_progress = False
         self._schedule_next_auto_update()
         self.refresh_all()
+        latest = self.database.latest_issue() or "未知"
         display = f"在线更新失败：{message}"
-        self.footer_var.set(display + "；本地数据仍可正常使用。")
+        self.footer_var.set(display + f"；已自动保留本地数据（最近期号 {latest}）。")
         if manual:
             messagebox.showerror("在线更新失败", display)
 
