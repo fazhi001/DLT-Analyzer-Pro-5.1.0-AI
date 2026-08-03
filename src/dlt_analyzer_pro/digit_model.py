@@ -34,6 +34,19 @@ _MIN_ABSOLUTE_IMPROVEMENT = 0.002
 _MIN_RELATIVE_IMPROVEMENT = 0.0025
 
 
+def prediction_brief(predictions: Iterable[DigitPrediction], limit: int = 3) -> str:
+    """Return a compact, user-facing summary without implying a win guarantee."""
+    rows = list(predictions)
+    if not rows:
+        return "尚未生成候选号码。"
+    shown = "、".join(item.number_text for item in rows[:max(1, limit)])
+    best = max(item.score for item in rows)
+    return (
+        f"已生成 {len(rows)} 注候选｜前 {min(len(rows), max(1, limit))} 注：{shown}"
+        f"｜最高相对评分 {best:.2f}。结果仅供统计排序参考。"
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class PositionModelStatus:
     position: int
