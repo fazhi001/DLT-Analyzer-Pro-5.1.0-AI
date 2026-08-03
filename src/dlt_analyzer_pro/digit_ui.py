@@ -21,6 +21,7 @@ from .digit_model import (
     DigitModelReport,
     DigitPredictionEngine,
     digit_analysis_rows,
+    prediction_brief,
 )
 from .digit_updater import DigitUpdateResult, OfficialDigitUpdater
 from .models import DigitBacktestResult, DigitPrediction
@@ -34,21 +35,23 @@ class DigitGamesWindow:
         self.parent = parent
         self.database = database
         self.window = tk.Toplevel(parent)
-        self.window.title("DLT Analyzer Pro 5.1.1 · 排列三 / 排列五中心")
+        self.window.title("DLT Analyzer Pro 5.2 · 排列三 / 排列五中心")
         self.window.geometry("1180x760")
         self.window.minsize(980, 650)
         self.window.transient(parent)
 
         self.game_var = tk.StringVar(value="排列三")
         self.status_var = tk.StringVar(value="就绪")
-        self.count_var = tk.IntVar(value=10)
+        self.count_var = tk.IntVar(value=5)
         self.strategy_var = tk.StringVar(value="均衡模式")
         self.target_issue_var = tk.StringVar(value="下一期")
         self.periods_var = tk.IntVar(value=50)
         self.current_predictions: list[DigitPrediction] = []
         self.current_backtest: DigitBacktestResult | None = None
         self.busy = False
+        self.advanced_controls_visible = False
 
+        self._configure_style()
         self._build()
         self.refresh_all()
         self.window.after(600, self._initial_sync)
@@ -57,13 +60,57 @@ class DigitGamesWindow:
     def game(self) -> str:
         return "pl3" if self.game_var.get() == "排列三" else "pl5"
 
+    def _configure_style(self) -> None:
+        """Give the digit center a clean dashboard treatment using stock Tk widgets."""
+        style = ttk.Style(self.window)
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+        self.window.configure(background="#F3F6FB")
+        style.configure("App.TFrame", background="#F3F6FB")
+        style.configure("Header.TFrame", background="#15233D")
+        style.configure("Card.TFrame", background="#FFFFFF")
+        style.configure("Quick.TLabelframe", background="#FFFFFF", borderwidth=0, relief="flat")
+        style.configure("Quick.TLabelframe.Label", background="#FFFFFF", foreground="#2563EB", font=("Microsoft YaHei UI", 10, "bold"))
+        style.configure("HeaderTitle.TLabel", background="#15233D", foreground="#FFFFFF", font=("Microsoft YaHei UI", 18, "bold"))
+        style.configure("HeaderHint.TLabel", background="#15233D", foreground="#B8C7E0", font=("Microsoft YaHei UI", 10))
+        style.configure("CardTitle.TLabel", background="#FFFFFF", foreground="#64748B", font=("Microsoft YaHei UI", 9))
+        style.configure("CardValue.TLabel", background="#FFFFFF", foreground="#14213D", font=("Microsoft YaHei UI", 15, "bold"))
+        style.configure("Accent.TButton", padding=(15, 9), font=("Microsoft YaHei UI", 10, "bold"), borderwidth=0)
+        style.configure("Secondary.TButton", padding=(11, 8), font=("Microsoft YaHei UI", 10), borderwidth=0)
+        style.map(
+            "Accent.TButton",
+            foreground=[("!disabled", "#FFFFFF")],
+            background=[("!disabled", "#2563EB"), ("active", "#1D4ED8")],
+        )
+        style.map(
+            "Secondary.TButton",
+            foreground=[("!disabled", "#1E3A5F")],
+            background=[("!disabled", "#E8EEF8"), ("active", "#D7E2F2")],
+        )
+        style.configure("TNotebook", background="#F3F6FB", borderwidth=0)
+        style.configure("TNotebook.Tab", padding=(16, 10), font=("Microsoft YaHei UI", 10), background="#E6ECF5", foreground="#46566D")
+        style.map("TNotebook.Tab", background=[("selected", "#FFFFFF")], foreground=[("selected", "#1D4ED8")])
+        style.configure("Digit.Treeview", rowheight=30, font=("Microsoft YaHei UI", 10), background="#FFFFFF", fieldbackground="#FFFFFF", foreground="#1F2937", borderwidth=0)
+        style.configure("Digit.Treeview.Heading", font=("Microsoft YaHei UI", 10, "bold"), background="#EEF3FA", foreground="#334155", relief="flat")
+        style.map("Digit.Treeview", background=[("selected", "#DBEAFE")], foreground=[("selected", "#14213D")])
+
     def _build(self) -> None:
-        root = ttk.Frame(self.window, padding=16)
+        shell = ttk.Frame(self.window, style="App.TFrame")
+        shell.pack(fill="both", expand=True)
+
+        header = ttk.Frame(shell, style="Header.TFrame", padding=(20, 15))
+        header.pack(fill="x")
+        ttk.Label(header, text="排列三 / 排列五", style="HeaderTitle.TLabel").pack(side="left")
+        ttk.Label(header, text="数据同步 · 统计分析 · 候选号码", style="HeaderHint.TLabel").pack(side="left", padx=(14, 0), pady=(5, 0))
+
+        root = ttk.Frame(shell, style="App.TFrame", padding=16)
         root.pack(fill="both", expand=True)
 
         toolbar = ttk.Frame(root)
         toolbar.pack(fill="x", pady=(0, 12))
-        ttk.Label(toolbar, text="彩票类型：", font=("Microsoft YaHei UI", 10, "bold")).pack(side="left")
+        ttk.Label(toolbar, text="当前彩种", font=("Microsoft YaHei UI", 10, "bold")).pack(side="left")
         game_box = ttk.Combobox(
             toolbar,
             textvariable=self.game_var,
@@ -73,21 +120,22 @@ class DigitGamesWindow:
         )
         game_box.pack(side="left", padx=(4, 12))
         game_box.bind("<<ComboboxSelected>>", lambda _event: self._change_game())
-        ttk.Button(toolbar, text="同步最新", command=lambda: self.sync_official(False)).pack(side="left")
-        ttk.Button(toolbar, text="一键补齐排列数据", command=lambda: self.sync_official(True)).pack(side="left", padx=8)
-        ttk.Button(toolbar, text="导入当前彩种", command=self.import_draws).pack(side="left")
-        ttk.Button(toolbar, text="导出当前历史", command=self.export_draws).pack(side="left", padx=8)
-        ttk.Label(toolbar, textvariable=self.status_var).pack(side="right")
+        ttk.Button(toolbar, text="同步最新", style="Secondary.TButton", command=lambda: self.sync_official(False)).pack(side="left")
+        ttk.Button(toolbar, text="补齐全部历史", style="Secondary.TButton", command=lambda: self.sync_official(True)).pack(side="left", padx=8)
+        ttk.Button(toolbar, text="导入", style="Secondary.TButton", command=self.import_draws).pack(side="left")
+        ttk.Button(toolbar, text="导出", style="Secondary.TButton", command=self.export_draws).pack(side="left", padx=8)
+        ttk.Label(toolbar, textvariable=self.status_var, foreground="#64748B").pack(side="right")
 
         summary = ttk.Frame(root)
         summary.pack(fill="x", pady=(0, 12))
         self.count_text = tk.StringVar(value="历史数据：0期")
         self.latest_text = tk.StringVar(value="最新期号：-")
         self.model_text = tk.StringVar(value="模型：统计融合")
-        for variable in (self.count_text, self.latest_text, self.model_text):
-            panel = ttk.LabelFrame(summary, text="", padding=(16, 10))
+        for title, variable in zip(("数据规模", "最新期号", "分析方式"), (self.count_text, self.latest_text, self.model_text)):
+            panel = ttk.Frame(summary, style="Card.TFrame", padding=(16, 12))
             panel.pack(side="left", fill="x", expand=True, padx=(0, 8))
-            ttk.Label(panel, textvariable=variable, font=("Microsoft YaHei UI", 11, "bold")).pack(anchor="w")
+            ttk.Label(panel, text=title, style="CardTitle.TLabel").pack(anchor="w")
+            ttk.Label(panel, textvariable=variable, style="CardValue.TLabel").pack(anchor="w", pady=(3, 0))
 
         self.notebook = ttk.Notebook(root)
         self.notebook.pack(fill="both", expand=True)
@@ -105,7 +153,7 @@ class DigitGamesWindow:
     def _build_history_tab(self) -> None:
         tab = ttk.Frame(self.notebook, padding=10)
         self.notebook.add(tab, text="历史开奖")
-        self.history_tree = ttk.Treeview(tab, show="headings")
+        self.history_tree = ttk.Treeview(tab, show="headings", style="Digit.Treeview")
         self.history_tree.pack(side="left", fill="both", expand=True)
         scrollbar = ttk.Scrollbar(tab, orient="vertical", command=self.history_tree.yview)
         scrollbar.pack(side="right", fill="y")
@@ -131,6 +179,7 @@ class DigitGamesWindow:
             tab,
             columns=("position", "digit", "count", "frequency", "omission", "probability", "mode"),
             show="headings",
+            style="Digit.Treeview",
         )
         columns = [
             ("position", "位置", 90), ("digit", "数字", 70), ("count", "出现次数", 90),
@@ -145,28 +194,41 @@ class DigitGamesWindow:
     def _build_prediction_tab(self) -> None:
         tab = ttk.Frame(self.notebook, padding=10)
         self.notebook.add(tab, text="智能选号")
-        controls = ttk.Frame(tab)
-        controls.pack(fill="x", pady=(0, 8))
-        ttk.Label(controls, text="目标期号：").pack(side="left")
-        ttk.Entry(controls, textvariable=self.target_issue_var, width=10).pack(side="left", padx=(4, 10))
-        ttk.Label(controls, text="注数：").pack(side="left")
-        ttk.Spinbox(controls, from_=1, to=200, textvariable=self.count_var, width=6).pack(side="left", padx=(4, 10))
-        ttk.Label(controls, text="策略：").pack(side="left")
+        quick = ttk.LabelFrame(tab, text="下一期快速选号", style="Quick.TLabelframe", padding=(14, 12))
+        quick.pack(fill="x", pady=(0, 8))
+        self.prediction_brief_var = tk.StringVar(value="默认生成 5 注均衡候选号码；可在高级设置中调整。")
+        ttk.Label(quick, textvariable=self.prediction_brief_var, font=("Microsoft YaHei UI", 10, "bold")).pack(side="left")
+        ttk.Button(
+            quick,
+            text="一键生成 5 注",
+            command=self.generate_quick_predictions,
+            style="Accent.TButton",
+        ).pack(side="right")
+        self.advanced_button = ttk.Button(quick, text="高级设置", command=self.toggle_advanced_controls)
+        self.advanced_button.pack(side="right", padx=(0, 8))
+
+        self.advanced_controls = ttk.Frame(tab)
+        ttk.Label(self.advanced_controls, text="目标期号：").pack(side="left")
+        ttk.Entry(self.advanced_controls, textvariable=self.target_issue_var, width=10).pack(side="left", padx=(4, 10))
+        ttk.Label(self.advanced_controls, text="注数：").pack(side="left")
+        ttk.Spinbox(self.advanced_controls, from_=1, to=200, textvariable=self.count_var, width=6).pack(side="left", padx=(4, 10))
+        ttk.Label(self.advanced_controls, text="策略：").pack(side="left")
         ttk.Combobox(
-            controls,
+            self.advanced_controls,
             textvariable=self.strategy_var,
             values=tuple(STRATEGIES),
             state="readonly",
             width=12,
         ).pack(side="left", padx=(4, 10))
-        ttk.Button(controls, text="训练/验证位置模型", command=self.train_models).pack(side="left")
-        ttk.Button(controls, text="生成号码", command=self.generate_predictions).pack(side="left", padx=8)
-        ttk.Button(controls, text="导出预测", command=self.export_predictions).pack(side="left")
+        ttk.Button(self.advanced_controls, text="训练/验证位置模型", command=self.train_models).pack(side="left")
+        ttk.Button(self.advanced_controls, text="按当前设置生成", command=self.generate_predictions).pack(side="left", padx=8)
+        ttk.Button(self.advanced_controls, text="导出预测", command=self.export_predictions).pack(side="left")
 
         self.prediction_tree = ttk.Treeview(
             tab,
             columns=("index", "number", "score", "sum", "span", "shape", "mode"),
             show="headings",
+            style="Digit.Treeview",
         )
         columns = [
             ("index", "序号", 60), ("number", "推荐号码", 130), ("score", "相对评分", 90),
@@ -176,12 +238,27 @@ class DigitGamesWindow:
         for key, title, width in columns:
             self.prediction_tree.heading(key, text=title)
             self.prediction_tree.column(key, width=width, anchor="center")
+        self.prediction_tree.tag_configure("top", background="#EAF2FF")
         self.prediction_tree.pack(fill="both", expand=True)
 
         self.model_report = tk.Text(tab, height=7, wrap="word")
         self.model_report.pack(fill="x", pady=(8, 0))
         self.model_report.insert("1.0", "点击“训练/验证位置模型”，程序会分别验证每个位置；未优于统计基线的位置不会启用AI。")
         self.model_report.configure(state="disabled")
+
+    def toggle_advanced_controls(self) -> None:
+        self.advanced_controls_visible = not self.advanced_controls_visible
+        if self.advanced_controls_visible:
+            self.advanced_controls.pack(fill="x", pady=(0, 8), before=self.prediction_tree)
+            self.advanced_button.configure(text="收起高级设置")
+        else:
+            self.advanced_controls.pack_forget()
+            self.advanced_button.configure(text="高级设置")
+
+    def generate_quick_predictions(self) -> None:
+        self.count_var.set(5)
+        self.strategy_var.set("均衡模式")
+        self.generate_predictions()
 
     def _build_backtest_tab(self) -> None:
         tab = ttk.Frame(self.notebook, padding=10)
@@ -199,6 +276,7 @@ class DigitGamesWindow:
             tab,
             columns=("issue", "model", "random", "exact_model", "exact_random"),
             show="headings",
+            style="Digit.Treeview",
         )
         for key, title, width in [
             ("issue", "期号", 100), ("model", "模型命中位置", 140),
@@ -395,6 +473,7 @@ class DigitGamesWindow:
                 shape = "全异" if repeats == 0 else "一组重复" if repeats == 1 else "多重重复"
                 self.prediction_tree.insert(
                     "", "end",
+                    tags=("top",) if index <= 3 else (),
                     values=(
                         index, item.number_text, f"{item.score:.2f}", sum(item.digits),
                         max(item.digits) - min(item.digits), shape, item.model_mode,
@@ -403,6 +482,7 @@ class DigitGamesWindow:
             mode = self.current_predictions[0].model_mode if self.current_predictions else "-"
             self.model_text.set(f"模型：{mode}")
             self.status_var.set(f"已生成{len(self.current_predictions)}注{GAME_NAMES[self.game]}号码")
+            self.prediction_brief_var.set(prediction_brief(self.current_predictions))
         except Exception as exc:
             messagebox.showerror("生成失败", str(exc), parent=self.window)
 
